@@ -8,6 +8,30 @@ export type MediaKind =
   | 'markdown'
   | 'text'
   | 'file'
+  | 'heading'
+  | 'sticky'
+  | 'shape'
+
+export type HeadingLevel = 1 | 2 | 3
+
+/** level: 0 表示默认（无标题效果） */
+export type HeadingLevelOrNone = 0 | HeadingLevel
+
+export type TextAlign = 'left' | 'center' | 'right' | 'justify'
+export type TextAlignV = 'top' | 'middle' | 'bottom'
+
+export type ShapeType = 'rect' | 'ellipse'
+
+export type StickyColor = 'yellow' | 'green' | 'blue' | 'pink' | 'purple' | 'gray'
+
+export const STICKY_COLORS: Record<StickyColor, { bg: string; border: string }> = {
+  yellow: { bg: '#fde68a', border: '#f59e0b' },
+  green: { bg: '#bbf7d0', border: '#22c55e' },
+  blue: { bg: '#bfdbfe', border: '#3b82f6' },
+  pink: { bg: '#fbcfe8', border: '#ec4899' },
+  purple: { bg: '#ddd6fe', border: '#8b5cf6' },
+  gray: { bg: '#e2e8f0', border: '#94a3b8' },
+}
 
 export interface AssetMeta {
   id: string
@@ -51,6 +75,19 @@ export interface SuqNodeData extends Record<string, unknown> {
   backgroundColor?: string
   pageCount?: number
   autoEdit?: boolean
+  level?: HeadingLevelOrNone
+  color?: StickyColor
+  shape?: ShapeType
+  fill?: string
+  textAlign?: TextAlign
+  textAlignV?: TextAlignV
+  fontSize?: number
+  fontFamily?: string
+  textColor?: string
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  lineHeight?: number
 }
 
 export interface SuqEdgeData extends Record<string, unknown> {

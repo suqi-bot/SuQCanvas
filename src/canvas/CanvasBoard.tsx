@@ -16,7 +16,14 @@ import { useCanvasStore } from '../store/canvasStore'
 import { useProjectStore } from '../store/projectStore'
 import { useUiStore } from '../store/uiStore'
 import { useSettingsStore } from '../store/settingsStore'
-import { createTextNode, importFiles } from '../io/fileLoader'
+import {
+  createHeadingNode,
+  createShapeNode,
+  createStickyNode,
+  createTextNode,
+  importFiles,
+} from '../io/fileLoader'
+import type { HeadingLevel, ShapeType, StickyColor } from '../types'
 import { DEFAULT_EDGE_STYLE } from '../types'
 import { mediaNodeTypes } from './nodes/nodeTypes'
 import { styledEdgeTypes } from './edges/edgeTypes'
@@ -32,7 +39,8 @@ function BoardInner() {
   const onEdgesChange = useCanvasStore((s) => s.onEdgesChange)
   const onConnect = useCanvasStore((s) => s.onConnect)
   const setViewport = useCanvasStore((s) => s.setViewport)
-  const { screenToFlowPosition, setViewport: rfSetViewport, fitView } = useReactFlow()
+  const { screenToFlowPosition, setViewport: rfSetViewport, fitView, zoomIn, zoomOut, setCenter } =
+    useReactFlow()
   const [dragging, setDragging] = useState(false)
 
   const projectId = useProjectStore((s) => s.projectId)
@@ -55,7 +63,14 @@ function BoardInner() {
     }
     const onKey = (e: KeyboardEvent) => {
       if (isTypingTarget()) return
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) useCanvasStore.getState().redo()
+        else useCanvasStore.getState().undo()
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        useCanvasStore.getState().redo()
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
         e.preventDefault()
         const selected = useCanvasStore.getState().nodes.filter((n) => n.selected)
         for (const n of selected) {
@@ -127,12 +142,44 @@ function BoardInner() {
   )
 
   useEffect(() => {
-    const onAddText = () => {
-      useCanvasStore.getState().addNodes([createTextNode(centerPosition(), true)])
+    const onAddNode = (e: Event) => {
+      const detail = (e as CustomEvent).detail ?? {}
+      const pos = centerPosition()
+      const store = useCanvasStore.getState()
+      switch (detail.kind) {
+        case 'heading':
+          store.addNodes([createHeadingNode(pos, (detail.level as HeadingLevel) ?? 1, true)])
+          break
+        case 'sticky':
+          store.addNodes([createStickyNode(pos, (detail.color as StickyColor) ?? 'yellow', true)])
+          break
+        case 'shape':
+          store.addNodes([createShapeNode(pos, (detail.shape as ShapeType) ?? 'rect', true)])
+          break
+        default:
+          store.addNodes([createTextNode(pos, true)])
+      }
     }
-    window.addEventListener('sq:add-text', onAddText)
-    return () => window.removeEventListener('sq:add-text', onAddText)
-  }, [centerPosition])
+    const onView = (e: Event) => {
+      const { action } = (e as CustomEvent).detail ?? {}
+      if (action === 'fit') {
+        void fitView({ padding: 0.15, duration: 250 })
+      } else if (action === 'zoom-in') {
+        zoomIn({ duration: 200 })
+      } else if (action === 'zoom-out') {
+        zoomOut({ duration: 200 })
+      } else if (action === 'reset') {
+        const c = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+        setCenter(c.x, c.y, { zoom: 1, duration: 200 })
+      }
+    }
+    window.addEventListener('sq:add-node', onAddNode)
+    window.addEventListener('sq:view', onView)
+    return () => {
+      window.removeEventListener('sq:add-node', onAddNode)
+      window.removeEventListener('sq:view', onView)
+    }
+  }, [centerPosition, fitView, zoomIn, zoomOut, screenToFlowPosition, setCenter])
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {

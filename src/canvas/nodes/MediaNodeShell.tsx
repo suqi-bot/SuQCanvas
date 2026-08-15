@@ -14,9 +14,14 @@ const HANDLE_SIDES = [
 interface ShellProps {
   node: NodeProps<SuqNode>
   children: ReactNode
+  showBar?: boolean
 }
 
-export const MediaNodeShell = memo(function MediaNodeShell({ node, children }: ShellProps) {
+export const MediaNodeShell = memo(function MediaNodeShell({
+  node,
+  children,
+  showBar = true,
+}: ShellProps) {
   const { id, data, selected } = node
   const [hovered, setHovered] = useState(false)
   const { deleteElements } = useReactFlow()
@@ -50,17 +55,19 @@ export const MediaNodeShell = memo(function MediaNodeShell({ node, children }: S
 
       <div className="min-h-0 flex-1">{children}</div>
 
-      <div
-        className="flex h-7 shrink-0 items-center gap-1.5 border-t bg-[var(--nodebar)] px-2"
-        style={{ borderColor: 'var(--nodebarline)' }}
-      >
-        <span className="text-mid">
-          <KindIcon kind={data.kind} />
-        </span>
-        <span className="truncate text-xs text-soft" title={data.label}>
-          {data.label ?? ''}
-        </span>
-      </div>
+      {showBar && selected && (
+        <div
+          className="flex h-7 shrink-0 items-center gap-1.5 border-t bg-[var(--nodebar)] px-2"
+          style={{ borderColor: 'var(--nodebarline)' }}
+        >
+          <span className="text-mid">
+            <KindIcon kind={data.kind} />
+          </span>
+          <span className="truncate text-xs text-soft" title={data.label}>
+            {data.label ?? ''}
+          </span>
+        </div>
+      )}
 
       <NodeToolbar position={Position.Top} isVisible={hovered && !selected}>
         <div className="flex gap-1 rounded-lg border border-edge bg-panel p-1 shadow-xl">

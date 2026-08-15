@@ -1,7 +1,28 @@
 import { useReactFlow } from '@xyflow/react'
 import { useCanvasStore } from '../store/canvasStore'
-import type { ArrowPos, EdgeStyle, LineStyle, PathType } from '../types'
-import { CopyIcon, TrashIcon } from '../canvas/nodes/Icons'
+import type {
+  ArrowPos,
+  EdgeStyle,
+  HeadingLevelOrNone,
+  LineStyle,
+  PathType,
+  ShapeType,
+  StickyColor,
+  TextAlign,
+  TextAlignV,
+} from '../types'
+import { STICKY_COLORS } from '../types'
+import {
+  CopyIcon,
+  TextAlignBottomIcon,
+  TextAlignCenterIcon,
+  TextAlignJustifyIcon,
+  TextAlignLeftIcon,
+  TextAlignMiddleIcon,
+  TextAlignRightIcon,
+  TextAlignTopIcon,
+  TrashIcon,
+} from '../canvas/nodes/Icons'
 
 const PRESET_COLORS = ['#64748b', '#38bdf8', '#34d399', '#fbbf24', '#f472b6', '#f87171', '#a78bfa', '#0f172a']
 
@@ -16,7 +37,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function Segmented<T extends string>({
+function Segmented<T extends string | number>({
   value,
   options,
   onChange,
@@ -45,6 +66,61 @@ function Segmented<T extends string>({
     </div>
   )
 }
+
+function IconSegmented<T extends string | number>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T
+  options: { value: T; label: React.ReactNode; title?: string }[]
+  onChange: (v: T) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {options.map((o) => (
+        <button
+          key={String(o.value)}
+          type="button"
+          title={o.title}
+          onClick={() => onChange(o.value)}
+          className={`rounded-md p-1.5 transition-colors ${
+            value === o.value ? 'bg-sky-600 text-white' : 'bg-panel2 text-soft hover:bg-hover'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+const H_ALIGN_ICONS: Record<string, React.ReactNode> = {
+  left: <TextAlignLeftIcon />,
+  center: <TextAlignCenterIcon />,
+  right: <TextAlignRightIcon />,
+  justify: <TextAlignJustifyIcon />,
+}
+
+const V_ALIGN_ICONS: Record<string, React.ReactNode> = {
+  top: <TextAlignTopIcon />,
+  middle: <TextAlignMiddleIcon />,
+  bottom: <TextAlignBottomIcon />,
+}
+
+const FONT_OPTIONS = [
+  { value: '', label: '默认字体' },
+  { value: '"Microsoft YaHei", sans-serif', label: '微软雅黑' },
+  { value: '"SimSun", serif', label: '宋体' },
+  { value: '"SimHei", sans-serif', label: '黑体' },
+  { value: '"KaiTi", serif', label: '楷体' },
+  { value: '"FangSong", serif', label: '仿宋' },
+  { value: '"Arial", sans-serif', label: 'Arial' },
+  { value: '"Times New Roman", serif', label: 'Times New Roman' },
+  { value: '"Georgia", serif', label: 'Georgia' },
+  { value: '"Courier New", monospace', label: 'Courier New' },
+  { value: 'monospace', label: '等宽字体' },
+]
 
 function ColorField({
   value,
@@ -106,7 +182,7 @@ export function InspectorPanel() {
   const firstNode = selectedNodes[0]
 
   return (
-    <aside className="absolute right-3 top-3 z-30 w-64 select-none overflow-hidden rounded-xl border border-edge bg-panel/95 text-main shadow-2xl">
+    <aside className="absolute bottom-3 right-3 top-3 z-30 w-64 select-none overflow-y-auto rounded-xl border border-edge bg-panel/95 text-main shadow-2xl">
       {selectedEdges.length > 0 && firstEdge && (
         <>
           <div className="flex items-center justify-between border-b border-edge px-3 py-2">
@@ -201,6 +277,212 @@ export function InspectorPanel() {
               onChange={(c) => updateNodeData(firstNode.id, { borderColor: c })}
             />
           </Section>
+          {selectedNodes.length === 1 &&
+            (firstNode.data.kind === 'text' ||
+              firstNode.data.kind === 'heading' ||
+              firstNode.data.kind === 'sticky' ||
+              firstNode.data.kind === 'shape') && (
+              <>
+                <Section title="文字对齐">
+                  <IconSegmented<TextAlign>
+                    value={firstNode.data.textAlign ?? 'left'}
+                    onChange={(textAlign) => updateNodeData(firstNode.id, { textAlign })}
+                    options={[
+                      { value: 'left', label: H_ALIGN_ICONS.left, title: '左对齐' },
+                      { value: 'center', label: H_ALIGN_ICONS.center, title: '居中' },
+                      { value: 'right', label: H_ALIGN_ICONS.right, title: '右对齐' },
+                      { value: 'justify', label: H_ALIGN_ICONS.justify, title: '两端对齐' },
+                    ]}
+                  />
+                  <div className="mt-1.5">
+                    <IconSegmented<TextAlignV>
+                      value={firstNode.data.textAlignV ?? 'top'}
+                      onChange={(textAlignV) => updateNodeData(firstNode.id, { textAlignV })}
+                      options={[
+                        { value: 'top', label: V_ALIGN_ICONS.top, title: '顶端对齐' },
+                        { value: 'middle', label: V_ALIGN_ICONS.middle, title: '垂直居中' },
+                        { value: 'bottom', label: V_ALIGN_ICONS.bottom, title: '底端对齐' },
+                      ]}
+                    />
+                  </div>
+                </Section>
+                <Section title="字体">
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      title="加粗"
+                      className={`h-7 w-8 rounded-md text-xs transition-colors ${
+                        firstNode.data.bold ? 'bg-sky-600 text-white' : 'bg-panel2 text-soft hover:bg-hover'
+                      }`}
+                      onClick={() => updateNodeData(firstNode.id, { bold: !firstNode.data.bold })}
+                    >
+                      <span className="font-bold">B</span>
+                    </button>
+                    <button
+                      type="button"
+                      title="斜体"
+                      className={`h-7 w-8 rounded-md text-xs transition-colors ${
+                        firstNode.data.italic ? 'bg-sky-600 text-white' : 'bg-panel2 text-soft hover:bg-hover'
+                      }`}
+                      onClick={() => updateNodeData(firstNode.id, { italic: !firstNode.data.italic })}
+                    >
+                      <span className="italic">I</span>
+                    </button>
+                    <button
+                      type="button"
+                      title="下划线"
+                      className={`h-7 w-8 rounded-md text-xs transition-colors ${
+                        firstNode.data.underline ? 'bg-sky-600 text-white' : 'bg-panel2 text-soft hover:bg-hover'
+                      }`}
+                      onClick={() =>
+                        updateNodeData(firstNode.id, { underline: !firstNode.data.underline })
+                      }
+                    >
+                      <span className="underline">U</span>
+                    </button>
+                  </div>
+
+                  <div className="mt-2.5 text-[11px] font-medium uppercase tracking-wider text-dim">
+                    文字大小
+                  </div>
+                  <input
+                    type="number"
+                    min={8}
+                    max={200}
+                    value={firstNode.data.fontSize ?? ''}
+                    placeholder="输入字号 (px)"
+                    onChange={(e) => {
+                      const v = e.target.value
+                      updateNodeData(firstNode.id, {
+                        fontSize: v === '' ? undefined : Math.min(200, Math.max(8, Number(v))),
+                      })
+                    }}
+                    className="mt-1 w-full rounded-md border border-edge2 bg-panel2 px-2 py-1.5 text-xs text-main outline-none focus:border-sky-500"
+                  />
+
+                  <div className="mt-2.5 text-[11px] font-medium uppercase tracking-wider text-dim">
+                    文字颜色
+                  </div>
+                  <div className="mt-1">
+                    <ColorField
+                      value={firstNode.data.textColor ?? '#94a3b8'}
+                      onChange={(textColor) => updateNodeData(firstNode.id, { textColor })}
+                    />
+                  </div>
+
+                  <div className="mt-2.5 text-[11px] font-medium uppercase tracking-wider text-dim">
+                    字体
+                  </div>
+                  <select
+                    value={firstNode.data.fontFamily ?? ''}
+                    onChange={(e) =>
+                      updateNodeData(firstNode.id, { fontFamily: e.target.value || undefined })
+                    }
+                    style={{ fontFamily: firstNode.data.fontFamily }}
+                    className="mt-1 w-full rounded-md border border-edge2 bg-panel2 px-2 py-1.5 text-xs text-main outline-none focus:border-sky-500"
+                  >
+                    {FONT_OPTIONS.map((f) => (
+                      <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="mt-2.5 text-[11px] font-medium uppercase tracking-wider text-dim">
+                    行距
+                  </div>
+                  <input
+                    type="number"
+                    min={0.5}
+                    max={5}
+                    step={0.1}
+                    value={firstNode.data.lineHeight ?? ''}
+                    placeholder="输入行距 (倍)"
+                    onChange={(e) => {
+                      const v = e.target.value
+                      updateNodeData(firstNode.id, {
+                        lineHeight:
+                          v === '' ? undefined : Math.min(5, Math.max(0.5, Number(v))),
+                      })
+                    }}
+                    className="mt-1 w-full rounded-md border border-edge2 bg-panel2 px-2 py-1.5 text-xs text-main outline-none focus:border-sky-500"
+                  />
+                </Section>
+              </>
+            )}
+
+          {selectedNodes.length === 1 && firstNode.data.kind === 'heading' && (
+            <Section title="标题级别">
+              <Segmented<HeadingLevelOrNone>
+                value={(firstNode.data.level ?? 1) as HeadingLevelOrNone}
+                onChange={(level) =>
+                  updateNodeData(firstNode.id, {
+                    level,
+                    label: level === 0 ? '文本' : `标题 ${level}`,
+                  })
+                }
+                options={[
+                  { value: 0, label: '默认' },
+                  { value: 1, label: 'H1' },
+                  { value: 2, label: 'H2' },
+                  { value: 3, label: 'H3' },
+                ]}
+              />
+            </Section>
+          )}
+
+          {selectedNodes.length === 1 && firstNode.data.kind === 'sticky' && (
+            <Section title="便签颜色">
+              <div className="flex flex-wrap gap-1.5">
+                {(Object.keys(STICKY_COLORS) as StickyColor[]).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    title={key}
+                    onClick={() =>
+                      updateNodeData(firstNode.id, {
+                        color: key,
+                        borderColor: STICKY_COLORS[key].border,
+                      })
+                    }
+                    className={`h-6 w-6 rounded-md border ${
+                      (firstNode.data.color ?? 'yellow') === key
+                        ? 'ring-2 ring-sky-400'
+                        : 'border-edge2'
+                    }`}
+                    style={{ backgroundColor: STICKY_COLORS[key].bg }}
+                  />
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {selectedNodes.length === 1 && firstNode.data.kind === 'shape' && (
+            <>
+              <Section title="形状">
+                <Segmented<ShapeType>
+                  value={firstNode.data.shape ?? 'rect'}
+                  onChange={(shape) =>
+                    updateNodeData(firstNode.id, {
+                      shape,
+                      label: shape === 'rect' ? '矩形' : '椭圆',
+                    })
+                  }
+                  options={[
+                    { value: 'rect', label: '矩形' },
+                    { value: 'ellipse', label: '椭圆' },
+                  ]}
+                />
+              </Section>
+              <Section title="填充颜色">
+                <ColorField
+                  value={firstNode.data.fill ?? '#38bdf8'}
+                  onChange={(fill) => updateNodeData(firstNode.id, { fill })}
+                />
+              </Section>
+            </>
+          )}
+
           {selectedNodes.length === 1 && (
             <Section title="操作">
               <button

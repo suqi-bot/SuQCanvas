@@ -18,8 +18,8 @@ interface UiState {
   pdfViewer: { assetId: string; name: string } | null
   openPdfViewer: (assetId: string, name: string) => void
   closePdfViewer: () => void
-  managerOpen: boolean
-  setManagerOpen: (open: boolean) => void
+  homeOpen: boolean
+  setHomeOpen: (open: boolean) => void
 }
 
 let toastId = 0
@@ -51,9 +51,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   closePdfViewer: () => {
     set({ pdfViewer: null })
   },
-  managerOpen: false,
-  setManagerOpen: (open) => {
-    set({ managerOpen: open })
+  homeOpen: false,
+  setHomeOpen: (open) => {
+    set({ homeOpen: open })
   },
 }))
 

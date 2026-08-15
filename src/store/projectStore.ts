@@ -2,6 +2,12 @@ import { create } from 'zustand'
 import { db } from '../db/db'
 import { useCanvasStore } from './canvasStore'
 import { toast } from './uiStore'
+import {
+  loadProjectBest,
+  syncProjectList,
+  updateProjectNameInCloud,
+  upsertProjectToCloud,
+} from '../sync/cloudSync'
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -55,13 +61,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   init: async () => {
     if (get().initialized) return
-    const latest = await db.projects.orderBy('updatedAt').last()
+    const list = await syncProjectList()
+    const latest = list[0]
     if (latest) {
       useCanvasStore.setState({
         nodes: latest.graph.nodes,
         edges: latest.graph.edges,
         viewport: latest.viewport,
       })
+      useCanvasStore.getState().clearHistory()
       set({
         projectId: latest.id,
         projectName: latest.name,
@@ -73,6 +81,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const now = Date.now()
       const id = crypto.randomUUID()
       await db.projects.add({
+        id,
+        name: '未命名项目',
+        createdAt: now,
+        updatedAt: now,
+        graph: { nodes: [], edges: [] },
+        viewport: { x: 0, y: 0, zoom: 1 },
+      })
+      await upsertProjectToCloud({
         id,
         name: '未命名项目',
         createdAt: now,
@@ -92,7 +108,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   loadProject: async (id) => {
-    const record = await db.projects.get(id)
+    const record = await loadProjectBest(id)
     if (!record) {
       toast('项目不存在', 'error')
       return
@@ -103,6 +119,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       edges: record.graph.edges,
       viewport: record.viewport,
     })
+    useCanvasStore.getState().clearHistory()
     set({
       projectId: id,
       projectName: record.name,
@@ -114,16 +131,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   newProject: async (name = '未命名项目') => {
     if (get().loaded) await get().saveNow()
     useCanvasStore.getState().reset()
+    useCanvasStore.getState().clearHistory()
     const now = Date.now()
     const id = crypto.randomUUID()
-    await db.projects.add({
+    const record = {
       id,
       name,
       createdAt: now,
       updatedAt: now,
       graph: { nodes: [], edges: [] },
       viewport: { x: 0, y: 0, zoom: 1 },
-    })
+    }
+    await db.projects.add(record)
+    await upsertProjectToCloud(record)
     set({
       projectId: id,
       projectName: name,
@@ -134,6 +154,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   renameProject: async (id, name) => {
     await db.projects.update(id, { name })
+    await updateProjectNameInCloud(id, name)
     if (get().projectId === id) set({ projectName: name })
   },
 
@@ -141,13 +162,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { projectId, loaded } = get()
     if (!projectId || !loaded) return
     const { nodes, edges, viewport } = useCanvasStore.getState()
+    const record = {
+      id: projectId,
+      name: get().projectName,
+      createdAt: 0,
+      updatedAt: Date.now(),
+      graph: { nodes, edges },
+      viewport,
+    }
     set({ saveStatus: 'saving' })
     try {
       await db.projects.update(projectId, {
-        graph: { nodes, edges },
+        name: record.name,
+        graph: record.graph,
         viewport,
-        updatedAt: Date.now(),
+        updatedAt: record.updatedAt,
       })
+      await upsertProjectToCloud(record)
       set({ saveStatus: 'saved' })
     } catch (err) {
       console.error('保存失败', err)

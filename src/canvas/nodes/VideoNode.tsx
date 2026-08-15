@@ -11,7 +11,7 @@ const MAX_H = 360
 export const VideoNode = memo(function VideoNode(props: NodeProps<SuqNode>) {
   const url = useAssetUrl(props.data.assetId)
   const poster = useThumbnailUrl(props.data.assetId)
-  const updateNodeStyle = useCanvasStore((s) => s.updateNodeStyle)
+  const onNodesChange = useCanvasStore((s) => s.onNodesChange)
   const fittedRef = useRef(false)
   const boxRef = useRef<HTMLDivElement | null>(null)
   const [nearViewport, setNearViewport] = useState(true)
@@ -36,7 +36,17 @@ export const VideoNode = memo(function VideoNode(props: NodeProps<SuqNode>) {
     const h = e.currentTarget.videoHeight
     if (!w || !h) return
     const scale = Math.min(MAX_W / w, MAX_H / h, 1)
-    updateNodeStyle(props.id, { width: Math.max(96, Math.round(w * scale)), height: Math.max(72, Math.round(h * scale)) })
+    onNodesChange([
+      {
+        id: props.id,
+        type: 'dimensions',
+        setAttributes: true,
+        dimensions: {
+          width: Math.max(96, Math.round(w * scale)),
+          height: Math.max(72, Math.round(h * scale)),
+        },
+      },
+    ])
   }
 
   return (

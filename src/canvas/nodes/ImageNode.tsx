@@ -10,7 +10,7 @@ const MAX_H = 360
 
 export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
   const url = useAssetUrl(props.data.assetId)
-  const updateNodeStyle = useCanvasStore((s) => s.updateNodeStyle)
+  const onNodesChange = useCanvasStore((s) => s.onNodesChange)
   const fittedRef = useRef(false)
 
   const handleLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -19,7 +19,17 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
     const { naturalWidth: w, naturalHeight: h } = e.currentTarget
     if (!w || !h) return
     const scale = Math.min(MAX_W / w, MAX_H / h, 1)
-    updateNodeStyle(props.id, { width: Math.max(48, Math.round(w * scale)), height: Math.max(48, Math.round(h * scale)) })
+    onNodesChange([
+      {
+        id: props.id,
+        type: 'dimensions',
+        setAttributes: true,
+        dimensions: {
+          width: Math.max(48, Math.round(w * scale)),
+          height: Math.max(48, Math.round(h * scale)),
+        },
+      },
+    ])
   }
 
   return (
