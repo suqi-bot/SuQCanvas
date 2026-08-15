@@ -1,0 +1,327 @@
+@import 'tailwindcss';
+
+@theme inline {
+  --color-app: var(--app);
+  --color-panel: var(--panel);
+  --color-panel2: var(--panel2);
+  --color-hover: var(--hover);
+  --color-edge: var(--edge);
+  --color-edge2: var(--edge2);
+  --color-main: var(--main);
+  --color-soft: var(--soft);
+  --color-mid: var(--mid);
+  --color-dim: var(--dim);
+  --color-faint: var(--faint);
+}
+
+:root {
+  --app: #020617;
+  --panel: #0f172a;
+  --panel2: #1e293b;
+  --hover: #334155;
+  --edge: #1e293b;
+  --edge2: #334155;
+  --main: #f1f5f9;
+  --soft: #cbd5e1;
+  --mid: #94a3b8;
+  --dim: #64748b;
+  --faint: #475569;
+  --well: rgba(2, 6, 23, 0.4);
+  --nodebg: rgba(30, 41, 59, 0.95);
+  --nodebar: rgba(15, 23, 42, 0.6);
+  --nodebarline: rgba(51, 65, 85, 0.6);
+  --dot: #334155;
+  --minibg: #0f172a;
+  --minimask: rgba(2, 6, 23, 0.7);
+  --overlay: rgba(2, 6, 23, 0.85);
+  --accenttext: #7dd3fc;
+  --codebg: #1e293b;
+  --codefg: #7dd3fc;
+  --prebg: #0f172a;
+  --preborder: #1e293b;
+  --precode: #e2e8f0;
+  --quoteline: #475569;
+  --quotetext: #94a3b8;
+  --mdtext: #cbd5e1;
+  --mdhead: #f1f5f9;
+  --mdlink: #38bdf8;
+  --mdborder: #334155;
+  --handlering: #0f172a;
+  --ctrlbg: #1e293b;
+  --ctrlborder: #334155;
+  --ctrlfg: #94a3b8;
+  --toastinfo-bg: #1e293b;
+  --toastinfo-border: #334155;
+  --toastinfo-fg: #e2e8f0;
+  --toastok-bg: rgba(6, 78, 59, 0.85);
+  --toastok-border: #047857;
+  --toastok-fg: #a7f3d0;
+  --toasterr-bg: rgba(136, 19, 55, 0.85);
+  --toasterr-border: #be123c;
+  --toasterr-fg: #fecdd3;
+}
+
+html.light {
+  --app: #f1f5f9;
+  --panel: #ffffff;
+  --panel2: #f1f5f9;
+  --hover: #e2e8f0;
+  --edge: #e2e8f0;
+  --edge2: #cbd5e1;
+  --main: #0f172a;
+  --soft: #334155;
+  --mid: #475569;
+  --dim: #64748b;
+  --faint: #94a3b8;
+  --well: rgba(226, 232, 240, 0.55);
+  --nodebg: rgba(255, 255, 255, 0.97);
+  --nodebar: rgba(241, 245, 249, 0.85);
+  --nodebarline: rgba(203, 213, 225, 0.8);
+  --dot: #cbd5e1;
+  --minibg: #f8fafc;
+  --minimask: rgba(241, 245, 249, 0.72);
+  --overlay: rgba(241, 245, 249, 0.88);
+  --accenttext: #0369a1;
+  --codebg: #e2e8f0;
+  --codefg: #0e7490;
+  --prebg: #f8fafc;
+  --preborder: #e2e8f0;
+  --precode: #1e293b;
+  --quoteline: #cbd5e1;
+  --quotetext: #475569;
+  --mdtext: #334155;
+  --mdhead: #0f172a;
+  --mdlink: #0284c7;
+  --mdborder: #cbd5e1;
+  --handlering: #ffffff;
+  --ctrlbg: #ffffff;
+  --ctrlborder: #e2e8f0;
+  --ctrlfg: #475569;
+  --toastinfo-bg: #ffffff;
+  --toastinfo-border: #e2e8f0;
+  --toastinfo-fg: #1e293b;
+  --toastok-bg: #ecfdf5;
+  --toastok-border: #a7f3d0;
+  --toastok-fg: #065f46;
+  --toasterr-bg: #fff1f2;
+  --toasterr-border: #fecdd3;
+  --toasterr-fg: #9f1239;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overscroll-behavior: none;
+  background-color: var(--app);
+  color: var(--main);
+  font-family:
+    'PingFang SC',
+    'Microsoft YaHei',
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+.react-flow__attribution {
+  background: transparent;
+}
+
+.react-flow__node {
+  cursor: grab;
+  will-change: transform;
+}
+
+.react-flow__node:active {
+  cursor: grabbing;
+}
+
+.sq-handle {
+  width: 10px !important;
+  height: 10px !important;
+  border-radius: 9999px !important;
+  background: #38bdf8 !important;
+  border: 2px solid var(--handlering) !important;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.sq-handle-target {
+  z-index: 1;
+}
+
+.sq-handle-source {
+  z-index: 2;
+}
+
+.media-shell:hover .sq-handle,
+.media-shell.sq-selected .sq-handle {
+  opacity: 1;
+}
+
+.media-shell.sq-selected {
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.9);
+}
+
+.sq-drag-active .react-flow__pane {
+  cursor: copy;
+}
+
+.react-flow__controls {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  background: var(--ctrlbg);
+  border-bottom: 1px solid var(--ctrlborder);
+  color: var(--ctrlfg);
+  fill: var(--ctrlfg);
+  width: 28px;
+  height: 28px;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--hover);
+  color: var(--main);
+  fill: var(--main);
+}
+
+.sq-toast {
+  pointer-events: auto;
+  max-width: 28rem;
+  border-radius: 0.5rem;
+  border-width: 1px;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+}
+
+.sq-toast-info {
+  background: var(--toastinfo-bg);
+  border-color: var(--toastinfo-border);
+  color: var(--toastinfo-fg);
+}
+
+.sq-toast-success {
+  background: var(--toastok-bg);
+  border-color: var(--toastok-border);
+  color: var(--toastok-fg);
+}
+
+.sq-toast-error {
+  background: var(--toasterr-bg);
+  border-color: var(--toasterr-border);
+  color: var(--toasterr-fg);
+}
+
+.sq-markdown {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--mdtext);
+}
+
+.sq-markdown h1,
+.sq-markdown h2,
+.sq-markdown h3,
+.sq-markdown h4 {
+  color: var(--mdhead);
+  font-weight: 600;
+  margin: 0.7em 0 0.4em;
+}
+
+.sq-markdown h1 {
+  font-size: 1.4em;
+}
+
+.sq-markdown h2 {
+  font-size: 1.25em;
+}
+
+.sq-markdown h3 {
+  font-size: 1.1em;
+}
+
+.sq-markdown p {
+  margin: 0.4em 0;
+}
+
+.sq-markdown ul,
+.sq-markdown ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+
+.sq-markdown ul {
+  list-style: disc;
+}
+
+.sq-markdown ol {
+  list-style: decimal;
+}
+
+.sq-markdown li {
+  margin: 0.2em 0;
+}
+
+.sq-markdown code {
+  background: var(--codebg);
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+  font-size: 0.9em;
+  color: var(--codefg);
+}
+
+.sq-markdown pre {
+  background: var(--prebg);
+  border: 1px solid var(--preborder);
+  border-radius: 8px;
+  padding: 0.8em;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+
+.sq-markdown pre code {
+  background: transparent;
+  padding: 0;
+  color: var(--precode);
+}
+
+.sq-markdown blockquote {
+  border-left: 3px solid var(--quoteline);
+  padding-left: 0.8em;
+  margin: 0.5em 0;
+  color: var(--quotetext);
+}
+
+.sq-markdown a {
+  color: var(--mdlink);
+  text-decoration: underline;
+}
+
+.sq-markdown hr {
+  border-color: var(--mdborder);
+  margin: 0.8em 0;
+}
+
+.sq-markdown img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+.sq-markdown table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.95em;
+}
+
+.sq-markdown th,
+.sq-markdown td {
+  border: 1px solid var(--mdborder);
+  padding: 0.3em 0.6em;
+}
