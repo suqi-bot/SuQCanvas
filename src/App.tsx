@@ -8,6 +8,7 @@ import { AuthPage } from './components/AuthPage'
 import { useProjectStore } from './store/projectStore'
 import { useUiStore } from './store/uiStore'
 import { useAuthStore } from './store/authStore'
+import { initLanSync } from './sync/lanClient'
 
 export default function App() {
   const user = useAuthStore((s) => s.user)
@@ -15,6 +16,8 @@ export default function App() {
 
   useEffect(() => {
     void useAuthStore.getState().init()
+    const stopLanSync = initLanSync()
+    return () => stopLanSync()
   }, [])
 
   useEffect(() => {

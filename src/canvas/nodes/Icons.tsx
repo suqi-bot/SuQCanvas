@@ -197,6 +197,15 @@ export function HomeIcon(props: IconProps) {
   )
 }
 
+export function LanIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <rect x="2.5" y="6.5" width="19" height="11" rx="2" />
+      <path d="M8.5 10.5h.01M12 10.5h.01M15.5 10.5h.01" />
+    </Base>
+  )
+}
+
 export function UndoIcon(props: IconProps) {
   return (
     <Base {...props}>

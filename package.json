@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lan": "node server/lan-server.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
@@ -20,6 +21,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
+    "ws": "^8.21.3",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
@@ -28,6 +30,7 @@
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.4",
     "fake-indexeddb": "^6.2.5",
     "oxlint": "^1.75.0",

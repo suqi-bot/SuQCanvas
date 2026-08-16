@@ -13,6 +13,7 @@ import type {
 import { toast } from '../store/uiStore'
 import { isOssConfigured, uploadAssetToOss, uploadThumbToOss } from '../sync/ossClient'
 import { upsertAssetMetaToCloud } from '../sync/cloudSync'
+import { isLanConnected, pushAssetToLan } from '../sync/lanClient'
 import { STICKY_COLORS } from '../types'
 
 function captureVideoThumbnail(file: File): Promise<Blob> {
@@ -94,6 +95,11 @@ export async function putAsset(file: File): Promise<AssetMeta> {
     size: file.size,
     kind,
     hasThumbnail: !!thumbnail,
+  }
+  if (isLanConnected()) {
+    void pushAssetToLan(meta, file).catch(() => {
+      toast(`「${file.name}」局域网分发失败`, 'error')
+    })
   }
   void syncAssetToCloud(meta, file, thumbnail).catch((err) => {
     console.warn('素材同步到 OSS 失败:', file.name, err)

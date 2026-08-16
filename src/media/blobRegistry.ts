@@ -1,6 +1,7 @@
 import { db } from '../db/db'
 import { downloadAssetFromOss, getOssThumb, isOssConfigured } from '../sync/ossClient'
 import { fetchCloudAssets } from '../sync/cloudSync'
+import { requestAssetFromLan } from '../sync/lanClient'
 
 const urlCache = new Map<string, string>()
 const thumbCache = new Map<string, string>()
@@ -36,8 +37,12 @@ export async function getAssetUrl(assetId: string): Promise<string> {
   if (!record) {
     await fetchBlobFromCloud(assetId)
     record = await db.assets.get(assetId)
-    if (!record) throw new Error(`资源不存在: ${assetId}`)
   }
+  if (!record) {
+    const ok = await requestAssetFromLan(assetId)
+    if (ok) record = await db.assets.get(assetId)
+  }
+  if (!record) throw new Error(`资源不存在: ${assetId}`)
   const url = URL.createObjectURL(record.blob)
   urlCache.set(assetId, url)
   return url

@@ -284,7 +284,7 @@ curl https://<ref>.supabase.co/functions/v1/oss-sts -H "Authorization: Bearer <a
 3. **STS 信任策略不能有 Resource 字段**，只写 Principal + Action
 4. **`.env` 修改后必须重启 dev server**（Vite 启动时读取）
 5. **AK 放前端仅限开发**，上线前删 AK、改用 `VITE_OSS_STS_URL`，并在 RAM 控制台删除明文 AccessKey
-6. **Edge Function 需带 anon key 鉴权**：前端 fetch 要加 `Authorization: Bearer <anon key>`
+6. **Edge Function 需带 anon key 鉴权**：前端 fetch 要同时加 `Authorization: Bearer <anon key>` 和 `apikey: <anon key>`（只带 Authorization 会报 "No API key found in request"）
 
 ---
 
@@ -294,9 +294,46 @@ curl https://<ref>.supabase.co/functions/v1/oss-sts -H "Authorization: Bearer <a
 src/sync/supabaseClient.ts   # Supabase 客户端（环境变量检测）
 src/sync/cloudSync.ts        # 云为主双向同步（合并/拉取/推送/删除）
 src/sync/ossClient.ts        # OSS 客户端（STS/AK 双模式）
-src/media/blobRegistry.ts    # 本地缓存优先，缺失时 OSS 兜底拉取
+src/sync/lanClient.ts        # 局域网协作（WebSocket 中继：画布同步/素材互传/跟随）
+src/store/lanStore.ts        # 局域网状态（连接/在线用户/跟随）
+src/media/blobRegistry.ts    # 本地缓存优先，缺失时 OSS → 局域网 兜底拉取
 src/store/projectStore.ts    # init/load/save 对接云
-src/io/fileLoader.ts         # 导入文件后自动上传 OSS + 元数据上云
+src/io/fileLoader.ts         # 导入文件后自动上传 OSS + 局域网分发 + 元数据上云
+server/lan-server.mjs        # 局域网中继服务器（npm run lan，默认端口 8790）
 supabase/schema.sql          # 建表 SQL
 supabase/functions/oss-sts/  # STS 凭证签发 Edge Function
 ```
+
+---
+
+## 八、局域网协作模式
+
+不依赖公网，同一局域网内多设备实时协作。
+
+### 1. 启动中继服务器
+
+任选一台局域网机器（任意系统，装了 Node 即可）：
+
+```bash
+npm run lan
+# 默认监听 0.0.0.0:8790，可用 PORT=9000 npm run lan 换端口
+```
+
+输出 `本机局域网 IP`（Windows: `ipconfig`，Linux/Mac: `ifconfig`）。
+
+### 2. 各设备连接
+
+应用工具栏右侧「局域网」按钮 → 输入 `ws://<中继机IP>:8790` → 连接。
+昵称可留空自动生成。连接后自动完成初始同步。
+
+### 3. 功能
+
+- **画布实时同步**：节点/连线/文字/位置自动广播（150ms 节流），新设备加入自动收到当前画布
+- **素材互传**：图片/视频/PDF 等以 256KB 分片广播；新设备缺失素材时按需向在线的设备请求
+- **在线用户列表**：显示昵称与 IP，可一键「跟随」某用户视角（平移/缩放实时跟随）
+- **与云端并存**：局域网模式与 Supabase/OSS 云同步互不干扰；素材加载优先级 本地缓存 → OSS → 局域网
+
+### 4. 协议
+
+文本 JSON 消息：`hello` / `welcome` / `users` / `leave` / `peer-joined` / `sync`（nodes+edges 全量）/ `viewport` / `asset-meta` / `asset-chunk`（base64 分片，支持 `to` 定向）/ `asset-request`。二进制统一 base64 封装，中继只转发不解析。
+

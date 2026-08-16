@@ -24,7 +24,10 @@ async function getCredentials(): Promise<OssCredentials> {
   if (stsUrl) {
     const headers: Record<string, string> = {}
     const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
-    if (anon) headers['Authorization'] = `Bearer ${anon}`
+    if (anon) {
+      headers['Authorization'] = `Bearer ${anon}`
+      headers['apikey'] = anon
+    }
     const res = await fetch(stsUrl, { headers })
     if (!res.ok) throw new Error('获取 OSS STS 凭证失败')
     const data = await res.json()

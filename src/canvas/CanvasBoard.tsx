@@ -16,6 +16,7 @@ import { useCanvasStore } from '../store/canvasStore'
 import { useProjectStore } from '../store/projectStore'
 import { useUiStore } from '../store/uiStore'
 import { useSettingsStore } from '../store/settingsStore'
+import { useLanStore } from '../store/lanStore'
 import {
   createHeadingNode,
   createShapeNode,
@@ -51,6 +52,17 @@ function BoardInner() {
     const vp = useCanvasStore.getState().viewport
     rfSetViewport({ x: vp.x, y: vp.y, zoom: vp.zoom }, { duration: 0 })
   }, [projectId, rfSetViewport])
+
+  // 局域网跟随视图：应用远端视口
+  useEffect(() => {
+    const unsub = useLanStore.subscribe((state, prev) => {
+      if (!state.remoteViewport || state.remoteViewport === prev.remoteViewport) return
+      const vp = state.remoteViewport
+      rfSetViewport({ x: vp.x, y: vp.y, zoom: vp.zoom }, { duration: 150 })
+      useCanvasStore.getState().setViewport(vp)
+    })
+    return unsub
+  }, [rfSetViewport])
 
   useEffect(() => {
     const isTypingTarget = () => {
