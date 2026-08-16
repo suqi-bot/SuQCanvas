@@ -9,7 +9,9 @@ import { useCanvasStore } from '../store/canvasStore'
 import { deleteProjectFromCloud, syncProjectList } from '../sync/cloudSync'
 import { isCloudConfigured } from '../sync/supabaseClient'
 import { isOssConfigured } from '../sync/ossClient'
-import type { SuqEdge, SuqNode } from '../types'
+import { useAuthStore } from '../store/authStore'
+import { STICKY_COLORS, type StickyColor, type SuqEdge, type SuqNode } from '../types'
+import type { Theme } from '../store/settingsStore'
 import { MoonIcon, PlusIcon, SunIcon } from '../canvas/nodes/Icons'
 
 function fmtTime(ts: number): string {
@@ -22,20 +24,265 @@ function fmtTime(ts: number): string {
   })
 }
 
-const KIND_COLOR: Record<string, string> = {
-  image: '#38bdf8',
-  video: '#a78bfa',
-  audio: '#34d399',
-  pdf: '#f87171',
-  markdown: '#94a3b8',
-  text: '#64748b',
-  file: '#64748b',
-  heading: '#fbbf24',
-  sticky: '#fde68a',
-  shape: '#4ade80',
+function loadImageFromBlob(blob: Blob): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve(img)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(null)
+    }
+    img.src = url
+  })
 }
 
-function ProjectThumb({ nodes, edges }: { nodes: SuqNode[]; edges: SuqEdge[] }) {
+function truncateTo(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
+  if (ctx.measureText(text).width <= maxW) return text
+  let t = text
+  while (t.length > 1 && ctx.measureText(`${t}…`).width > maxW) t = t.slice(0, -1)
+  return `${t}…`
+}
+
+function formatBytes(size: number): string {
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
+  if (size >= 1024) return `${(size / 1024).toFixed(0)} KB`
+  return `${size} B`
+}
+
+interface TextOpts {
+  fontSize: number
+  color: string
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  align?: 'left' | 'center' | 'right' | 'justify'
+  alignV?: 'top' | 'middle' | 'bottom'
+  pad?: number
+}
+
+function drawTextBlock(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  o: TextOpts,
+): void {
+  if (!text) return
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(x, y, w, h)
+  ctx.clip()
+  ctx.font = `${o.italic ? 'italic ' : ''}${o.bold ? '700 ' : ''}${o.fontSize}px system-ui, sans-serif`
+  ctx.fillStyle = o.color
+  ctx.textBaseline = 'middle'
+  const pad = o.pad ?? 4
+  const lineH = o.fontSize * 1.5
+  const lines = text.split('\n')
+  const totalH = lines.length * lineH
+  let y0 = y + pad
+  if (o.alignV === 'middle') y0 = y + (h - totalH) / 2
+  else if (o.alignV === 'bottom') y0 = y + h - totalH - pad
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const cy = y0 + i * lineH + lineH / 2
+    const lw = ctx.measureText(line).width
+    let lx = x + pad
+    if (o.align === 'center') lx = x + (w - lw) / 2
+    else if (o.align === 'right') lx = x + w - lw - pad
+    ctx.fillText(line, lx, cy)
+    if (o.underline) {
+      ctx.fillRect(lx, cy + o.fontSize * 0.55, lw, Math.max(0.5, o.fontSize * 0.08))
+    }
+  }
+  ctx.restore()
+}
+
+const HEADING_FONT: Record<number, number> = { 1: 22, 2: 18, 3: 16 }
+
+interface ThumbPalette {
+  textBg: string
+  textColor: string
+  cardBg: string
+  cardLabel: string
+  cardSub: string
+  mediaBg: string
+  mediaText: string
+  emptyText: string
+  edgeColor: string
+}
+
+const THUMB_PALETTES: Record<Theme, ThumbPalette> = {
+  dark: {
+    textBg: 'rgba(148, 163, 184, 0.12)',
+    textColor: '#e2e8f0',
+    cardBg: 'rgba(100, 116, 139, 0.18)',
+    cardLabel: '#e2e8f0',
+    cardSub: 'rgba(148, 163, 184, 0.9)',
+    mediaBg: 'rgba(30, 41, 59, 0.6)',
+    mediaText: 'rgba(148, 163, 184, 0.9)',
+    emptyText: 'rgba(148, 163, 184, 0.45)',
+    edgeColor: 'rgba(148, 163, 184, 0.5)',
+  },
+  light: {
+    textBg: 'rgba(100, 116, 139, 0.08)',
+    textColor: '#1e293b',
+    cardBg: 'rgba(100, 116, 139, 0.1)',
+    cardLabel: '#334155',
+    cardSub: 'rgba(100, 116, 139, 0.8)',
+    mediaBg: 'rgba(226, 232, 240, 0.8)',
+    mediaText: 'rgba(100, 116, 139, 0.9)',
+    emptyText: 'rgba(100, 116, 139, 0.45)',
+    edgeColor: 'rgba(100, 116, 139, 0.5)',
+  },
+}
+
+function drawNodePreview(
+  ctx: CanvasRenderingContext2D,
+  n: SuqNode,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  scale: number,
+  p: ThumbPalette,
+): void {
+  const d = n.data ?? {}
+  const kind = d.kind ?? 'file'
+  const border = d.borderColor ?? '#64748b'
+  const fs = (px: number) => Math.max(4, px * scale)
+  const lw = Math.max(0.5, scale)
+
+  if (kind === 'image' || kind === 'video') {
+    ctx.fillStyle = p.mediaBg
+    ctx.beginPath()
+    ctx.roundRect(x, y, w, h, 2)
+    ctx.fill()
+    drawTextBlock(ctx, kind === 'image' ? '图片' : '视频', x, y, w, h, {
+      fontSize: fs(11),
+      color: p.mediaText,
+      align: 'center',
+      alignV: 'middle',
+    })
+    return
+  }
+
+  if (kind === 'sticky') {
+    const c = STICKY_COLORS[(d.color as StickyColor | undefined) ?? 'yellow']
+    ctx.fillStyle = c.bg
+    ctx.strokeStyle = c.border
+    ctx.lineWidth = lw
+    ctx.beginPath()
+    ctx.roundRect(x, y, w, h, 2)
+    ctx.fill()
+    ctx.stroke()
+    drawTextBlock(ctx, d.text ?? '', x, y, w, h, {
+      fontSize: fs(d.fontSize ?? 14),
+      color: '#1e293b',
+      bold: d.bold,
+      italic: d.italic,
+      align: d.textAlign,
+      alignV: d.textAlignV,
+    })
+    return
+  }
+
+  if (kind === 'shape') {
+    ctx.fillStyle = d.fill ?? '#38bdf8'
+    ctx.strokeStyle = border
+    ctx.lineWidth = lw
+    ctx.beginPath()
+    if ((d.shape ?? 'rect') === 'ellipse') {
+      ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2)
+    } else {
+      ctx.roundRect(x, y, w, h, 2)
+    }
+    ctx.fill()
+    ctx.stroke()
+    drawTextBlock(ctx, d.text ?? '', x, y, w, h, {
+      fontSize: fs(d.fontSize ?? 14),
+      color: '#0f172a',
+      align: 'center',
+      alignV: 'middle',
+    })
+    return
+  }
+
+  if (kind === 'heading') {
+    ctx.fillStyle = 'rgba(251, 191, 36, 0.12)'
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.5)'
+    ctx.lineWidth = lw
+    ctx.beginPath()
+    ctx.roundRect(x, y, w, h, 2)
+    ctx.fill()
+    ctx.stroke()
+    const lv = (d.level as number | undefined) ?? 1
+    drawTextBlock(ctx, d.text ?? '', x, y, w, h, {
+      fontSize: fs(HEADING_FONT[lv] ?? 18),
+      color: '#fbbf24',
+      bold: true,
+      alignV: 'middle',
+    })
+    return
+  }
+
+  if (kind === 'text' || kind === 'markdown') {
+    ctx.fillStyle = p.textBg
+    ctx.strokeStyle = border
+    ctx.lineWidth = lw
+    ctx.beginPath()
+    ctx.roundRect(x, y, w, h, 2)
+    ctx.fill()
+    ctx.stroke()
+    drawTextBlock(ctx, d.text ?? '', x, y, w, h, {
+      fontSize: fs(d.fontSize ?? 14),
+      color: d.textColor ?? p.textColor,
+      bold: d.bold,
+      italic: d.italic,
+      align: d.textAlign,
+      alignV: d.textAlignV,
+    })
+    return
+  }
+
+  ctx.fillStyle = p.cardBg
+  ctx.strokeStyle = border
+  ctx.lineWidth = lw
+  ctx.beginPath()
+  ctx.roundRect(x, y, w, h, 2)
+  ctx.fill()
+  ctx.stroke()
+  const label = d.label ?? ''
+  let sub = ''
+  if (kind === 'pdf' && typeof d.pageCount === 'number') sub = `${d.pageCount} 页`
+  else if (typeof d.fileSize === 'number') sub = formatBytes(d.fileSize)
+  ctx.textBaseline = 'middle'
+  const lx = x + 5
+  const midY = y + h / 2
+  ctx.fillStyle = p.cardLabel
+  ctx.font = `${fs(11)}px system-ui, sans-serif`
+  ctx.fillText(truncateTo(ctx, label, w - 10), lx, sub ? midY - fs(6) : midY)
+  if (sub) {
+    ctx.fillStyle = p.cardSub
+    ctx.font = `${fs(9)}px system-ui, sans-serif`
+    ctx.fillText(sub, lx, midY + fs(7))
+  }
+}
+
+function ProjectThumb({
+  nodes,
+  edges,
+  theme,
+}: {
+  nodes: SuqNode[]
+  edges: SuqEdge[]
+  theme: Theme
+}) {
   const ref = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
@@ -43,66 +290,109 @@ function ProjectThumb({ nodes, edges }: { nodes: SuqNode[]; edges: SuqEdge[] }) 
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    let alive = true
     const W = canvas.width
     const H = canvas.height
-    ctx.clearRect(0, 0, W, H)
-    if (nodes.length === 0) {
-      ctx.fillStyle = 'rgba(148, 163, 184, 0.45)'
-      ctx.font = '13px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText('空项目', W / 2, H / 2)
-      return
-    }
-    const sizeOf = (n: SuqNode) => ({
-      w: (n.width as number | undefined) ?? (n.style?.width as number | undefined) ?? 240,
-      h: (n.height as number | undefined) ?? (n.style?.height as number | undefined) ?? 160,
-    })
-    let minX = Infinity
-    let minY = Infinity
-    let maxX = -Infinity
-    let maxY = -Infinity
-    const sizes = new Map<string, { w: number; h: number }>()
-    for (const n of nodes) {
-      const s = sizeOf(n)
-      sizes.set(n.id, s)
-      minX = Math.min(minX, n.position.x)
-      minY = Math.min(minY, n.position.y)
-      maxX = Math.max(maxX, n.position.x + s.w)
-      maxY = Math.max(maxY, n.position.y + s.h)
-    }
-    const pad = 14
-    const bw = Math.max(1, maxX - minX)
-    const bh = Math.max(1, maxY - minY)
-    const scale = Math.min((W - pad * 2) / bw, (H - pad * 2) / bh)
-    const tx = (x: number) => pad + (x - minX) * scale
-    const ty = (y: number) => pad + (y - minY) * scale
+    const palette = THUMB_PALETTES[theme]
 
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.5)'
-    ctx.lineWidth = 1
-    for (const e of edges) {
-      const s = nodes.find((n) => n.id === e.source)
-      const t = nodes.find((n) => n.id === e.target)
-      if (!s || !t) continue
-      const ss = sizes.get(s.id) ?? { w: 240, h: 160 }
-      const ts = sizes.get(t.id) ?? { w: 240, h: 160 }
-      ctx.beginPath()
-      ctx.moveTo(tx(s.position.x + ss.w / 2), ty(s.position.y + ss.h / 2))
-      ctx.lineTo(tx(t.position.x + ts.w / 2), ty(t.position.y + ts.h / 2))
-      ctx.stroke()
-    }
+    void (async () => {
+      ctx.clearRect(0, 0, W, H)
+      if (nodes.length === 0) {
+        ctx.fillStyle = palette.emptyText
+        ctx.font = '13px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText('空项目', W / 2, H / 2)
+        return
+      }
+      const sizeOf = (n: SuqNode) => ({
+        w: (n.width as number | undefined) ?? (n.style?.width as number | undefined) ?? 240,
+        h: (n.height as number | undefined) ?? (n.style?.height as number | undefined) ?? 160,
+      })
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      const sizes = new Map<string, { w: number; h: number }>()
+      for (const n of nodes) {
+        const s = sizeOf(n)
+        sizes.set(n.id, s)
+        minX = Math.min(minX, n.position.x)
+        minY = Math.min(minY, n.position.y)
+        maxX = Math.max(maxX, n.position.x + s.w)
+        maxY = Math.max(maxY, n.position.y + s.h)
+      }
+      const pad = 14
+      const bw = Math.max(1, maxX - minX)
+      const bh = Math.max(1, maxY - minY)
+      const scale = Math.min((W - pad * 2) / bw, (H - pad * 2) / bh)
+      const tx = (x: number) => pad + (x - minX) * scale
+      const ty = (y: number) => pad + (y - minY) * scale
 
-    for (const n of nodes) {
-      const s = sizes.get(n.id) ?? { w: 240, h: 160 }
-      const x = tx(n.position.x)
-      const y = ty(n.position.y)
-      const w = Math.max(2, s.w * scale)
-      const h = Math.max(2, s.h * scale)
-      ctx.fillStyle = KIND_COLOR[n.data?.kind ?? 'file'] ?? '#64748b'
-      ctx.beginPath()
-      ctx.roundRect(x, y, w, h, 2)
-      ctx.fill()
+      for (const e of edges) {
+        const s = nodes.find((n) => n.id === e.source)
+        const t = nodes.find((n) => n.id === e.target)
+        if (!s || !t) continue
+        const ss = sizes.get(s.id) ?? { w: 240, h: 160 }
+        const ts = sizes.get(t.id) ?? { w: 240, h: 160 }
+        ctx.strokeStyle = e.data?.style?.stroke ?? palette.edgeColor
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(tx(s.position.x + ss.w / 2), ty(s.position.y + ss.h / 2))
+        ctx.lineTo(tx(t.position.x + ts.w / 2), ty(t.position.y + ts.h / 2))
+        ctx.stroke()
+      }
+
+      for (const n of nodes) {
+        const s = sizes.get(n.id) ?? { w: 240, h: 160 }
+        drawNodePreview(
+          ctx,
+          n,
+          tx(n.position.x),
+          ty(n.position.y),
+          Math.max(2, s.w * scale),
+          Math.max(2, s.h * scale),
+          scale,
+          palette,
+        )
+      }
+
+      const media = nodes.filter(
+        (n) => (n.data?.kind === 'image' || n.data?.kind === 'video') && n.data?.assetId,
+      )
+      if (media.length > 0) {
+        const loaded = await Promise.all(
+          media.map(async (n) => {
+            try {
+              const rec = await db.assets.get(n.data.assetId as string)
+              const blob = rec?.kind === 'image' ? rec.blob : rec?.thumbnail
+              const img = blob ? await loadImageFromBlob(blob) : null
+              return { n, img }
+            } catch {
+              return { n, img: null }
+            }
+          }),
+        )
+        if (!alive) return
+        for (const { n, img } of loaded) {
+          if (!img) continue
+          const s = sizes.get(n.id) ?? { w: 240, h: 160 }
+          const x = tx(n.position.x)
+          const y = ty(n.position.y)
+          const w = Math.max(2, s.w * scale)
+          const h = Math.max(2, s.h * scale)
+          const inset = Math.max(1.5, 6 * scale)
+          const ratio = Math.min((w - inset * 2) / img.naturalWidth, (h - inset * 2) / img.naturalHeight)
+          const dw = Math.max(1, img.naturalWidth * ratio)
+          const dh = Math.max(1, img.naturalHeight * ratio)
+          ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh)
+        }
+      }
+    })()
+
+    return () => {
+      alive = false
     }
-  }, [nodes, edges])
+  }, [nodes, edges, theme])
 
   return <canvas ref={ref} width={320} height={176} className="h-full w-full" />
 }
@@ -116,6 +406,8 @@ export function HomePage() {
   const renameProject = useProjectStore((s) => s.renameProject)
   const theme = useSettingsStore((s) => s.theme)
   const toggleTheme = useSettingsStore((s) => s.toggleTheme)
+  const user = useAuthStore((s) => s.user)
+  const signOut = useAuthStore((s) => s.signOut)
   const [projects, setProjects] = useState<ProjectRecord[]>([])
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -225,6 +517,21 @@ export function HomePage() {
             </span>
           )}
           <div className="flex-1" />
+          {user && (
+            <span
+              className="max-w-48 truncate rounded bg-sky-500/10 px-2 py-1 text-xs text-sky-400"
+              title={user.email ?? ''}
+            >
+              {user.email}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="rounded-md border border-edge2 px-3 py-1.5 text-xs text-soft hover:bg-hover"
+          >
+            退出登录
+          </button>
           <button
             type="button"
             onClick={() => importRef.current?.click()}
@@ -281,7 +588,7 @@ export function HomePage() {
                   className="relative h-36 w-full cursor-pointer bg-panel2/50 p-1.5"
                   title={`打开「${p.name}」`}
                 >
-                  <ProjectThumb nodes={p.graph.nodes} edges={p.graph.edges} />
+                  <ProjectThumb nodes={p.graph.nodes} edges={p.graph.edges} theme={theme} />
                   {p.id === currentId && (
                     <span className="absolute right-2 top-2 rounded bg-sky-600/80 px-1.5 py-0.5 text-[10px] text-white">
                       当前

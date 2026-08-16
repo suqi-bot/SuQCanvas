@@ -15,6 +15,12 @@ export interface CloudAsset {
   created_at: string
 }
 
+async function currentUserId(): Promise<string | null> {
+  if (!supabase) return null
+  const { data } = await supabase.auth.getUser()
+  return data.user?.id ?? null
+}
+
 /** 同步素材元数据到云端 assets 表 */
 export async function upsertAssetMetaToCloud(
   meta: { id: string; name: string; mime: string; size: number; kind: MediaKind; hasThumbnail?: boolean },
@@ -22,8 +28,11 @@ export async function upsertAssetMetaToCloud(
   ossThumbKey?: string,
 ): Promise<void> {
   if (!supabase) return
+  const userId = await currentUserId()
+  if (!userId) return
   const { error } = await supabase.from('assets').upsert({
     id: meta.id,
+    user_id: userId,
     name: meta.name,
     mime: meta.mime,
     size: meta.size,
@@ -111,7 +120,9 @@ export async function fetchCloudProject(id: string): Promise<CloudProject | null
 
 export async function upsertProjectToCloud(p: ProjectRecord): Promise<boolean> {
   if (!supabase) return false
-  const { error } = await supabase.from('projects').upsert(toCloud(p))
+  const userId = await currentUserId()
+  if (!userId) return false
+  const { error } = await supabase.from('projects').upsert({ ...toCloud(p), user_id: userId })
   if (error) {
     console.warn('推送项目到云端失败:', error.message)
     return false
