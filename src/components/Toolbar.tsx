@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useUiStore } from '../store/uiStore'
+import { useUiStore, type ToolMode } from '../store/uiStore'
 import { useProjectStore, type SaveStatus } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useCanvasStore, type AlignMode } from '../store/canvasStore'
@@ -13,8 +13,10 @@ import {
   AlignLeftIcon,
   AlignRightIcon,
   AlignTopIcon,
+  ConnectIcon,
   DistributeHIcon,
   DistributeVIcon,
+  DragIcon,
   FileIcon,
   FitIcon,
   HeadingIcon,
@@ -22,6 +24,7 @@ import {
   MoonIcon,
   PlusIcon,
   RedoIcon,
+  SelectIcon,
   ShapeIcon,
   StickyIcon,
   SunIcon,
@@ -69,6 +72,12 @@ const ALIGN_BUTTONS: { mode: AlignMode; title: string; icon: (props: React.SVGPr
   { mode: 'distributeV', title: '垂直分布', icon: DistributeVIcon },
 ]
 
+const TOOL_ITEMS: { mode: ToolMode; label: string; shortcut: string; icon: (props: React.SVGProps<SVGSVGElement>) => React.ReactNode }[] = [
+  { mode: 'select', label: '选中', shortcut: 'V', icon: SelectIcon },
+  { mode: 'connect', label: '连线', shortcut: 'C', icon: ConnectIcon },
+  { mode: 'drag', label: '拖动', shortcut: 'H', icon: DragIcon },
+]
+
 function dispatchAddNode(payload: Record<string, unknown>) {
   window.dispatchEvent(new CustomEvent('sq:add-node', { detail: payload }))
 }
@@ -87,6 +96,8 @@ export function Toolbar() {
 
   const requestImport = useUiStore((s) => s.requestImport)
   const setHomeOpen = useUiStore((s) => s.setHomeOpen)
+  const tool = useUiStore((s) => s.tool)
+  const setTool = useUiStore((s) => s.setTool)
   const projectName = useProjectStore((s) => s.projectName)
   const saveStatus = useProjectStore((s) => s.saveStatus)
   const theme = useSettingsStore((s) => s.theme)
@@ -215,6 +226,27 @@ export function Toolbar() {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="mx-1 h-5 w-px shrink-0 bg-edge2" />
+
+      <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-edge2 p-0.5">
+        {TOOL_ITEMS.map(({ mode, label, shortcut, icon: Icon }) => (
+          <button
+            key={mode}
+            type="button"
+            title={`${label} (${shortcut})`}
+            className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors ${
+              tool === mode
+                ? 'bg-sky-600 text-white'
+                : 'text-soft hover:bg-hover hover:text-main'
+            }`}
+            onClick={() => setTool(mode)}
+          >
+            <Icon />
+            {label}
+          </button>
+        ))}
       </div>
 
       <button type="button" title="撤销 (Ctrl+Z)" className={btnCls} disabled={!canUndo} onClick={undo}>

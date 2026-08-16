@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 
+export type ToolMode = 'select' | 'connect' | 'drag'
+
 export type ToastKind = 'info' | 'error' | 'success'
 
 export interface ToastItem {
@@ -20,6 +22,8 @@ interface UiState {
   closePdfViewer: () => void
   homeOpen: boolean
   setHomeOpen: (open: boolean) => void
+  tool: ToolMode
+  setTool: (tool: ToolMode) => void
 }
 
 let toastId = 0
@@ -54,6 +58,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   homeOpen: false,
   setHomeOpen: (open) => {
     set({ homeOpen: open })
+  },
+  tool: 'select',
+  setTool: (tool) => {
+    set({ tool })
   },
 }))
 

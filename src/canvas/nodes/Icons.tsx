@@ -250,6 +250,34 @@ export function FitIcon(props: IconProps) {
   )
 }
 
+export function SelectIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M5 3l14 8-6.2 1.5L9.5 19z" fill="currentColor" strokeWidth="0" />
+    </Base>
+  )
+}
+
+export function ConnectIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </Base>
+  )
+}
+
+export function DragIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M18 11V6a2 2 0 0 0-4 0v5" />
+      <path d="M14 10V4a2 2 0 0 0-4 0v6" />
+      <path d="M10 10V6a2 2 0 0 0-4 0v8" />
+      <path d="M6 12a2 2 0 0 0-2 2c0 3 1.5 6.5 4 8h6a4 4 0 0 0 4-4v-3.5a2 2 0 0 0-4 0" />
+    </Base>
+  )
+}
+
 export function AlignLeftIcon(props: IconProps) {
   return (
     <Base {...props}>

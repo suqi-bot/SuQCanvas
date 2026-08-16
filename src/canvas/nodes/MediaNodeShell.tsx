@@ -1,6 +1,14 @@
-import { memo, useState, type ReactNode } from 'react'
-import { Handle, NodeToolbar, Position, useReactFlow, type NodeProps } from '@xyflow/react'
+import { memo, useEffect, useState, type ReactNode } from 'react'
+import {
+  Handle,
+  NodeToolbar,
+  Position,
+  useReactFlow,
+  useUpdateNodeInternals,
+  type NodeProps,
+} from '@xyflow/react'
 import { useCanvasStore } from '../../store/canvasStore'
+import { useUiStore } from '../../store/uiStore'
 import type { SuqNode } from '../../types'
 import { CopyIcon, KindIcon, TrashIcon } from './Icons'
 
@@ -25,7 +33,14 @@ export const MediaNodeShell = memo(function MediaNodeShell({
   const { id, data, selected } = node
   const [hovered, setHovered] = useState(false)
   const { deleteElements } = useReactFlow()
+  const updateNodeInternals = useUpdateNodeInternals()
   const duplicateNode = useCanvasStore((s) => s.duplicateNode)
+  const tool = useUiStore((s) => s.tool)
+
+  // 模式切换时让 ReactFlow 重新测量手柄边界，保证连线模式下的边条带热区生效
+  useEffect(() => {
+    updateNodeInternals(id)
+  }, [tool, id, updateNodeInternals])
 
   return (
     <div
@@ -53,6 +68,28 @@ export const MediaNodeShell = memo(function MediaNodeShell({
         </span>
       ))}
 
+      {/* 连线模式：四条边作为连接热区，支持点击/拖动从对应边引线 */}
+      {HANDLE_SIDES.map(({ id: sid, position }) => (
+        <span key={`strip-${sid}`}>
+          <Handle
+            id={`connect-${sid}`}
+            type="source"
+            position={position}
+            isConnectable={tool === 'connect'}
+            isConnectableEnd={false}
+            className="sq-handle sq-handle-strip sq-handle-source"
+          />
+          <Handle
+            id={`connect-${sid}`}
+            type="target"
+            position={position}
+            isConnectable={tool === 'connect'}
+            isConnectableStart={false}
+            className="sq-handle sq-handle-strip sq-handle-target"
+          />
+        </span>
+      ))}
+
       <div className="min-h-0 flex-1">{children}</div>
 
       {showBar && selected && (
@@ -69,7 +106,7 @@ export const MediaNodeShell = memo(function MediaNodeShell({
         </div>
       )}
 
-      <NodeToolbar position={Position.Top} isVisible={hovered && !selected}>
+      <NodeToolbar position={Position.Top} isVisible={hovered && !selected && tool !== 'connect'}>
         <div className="flex gap-1 rounded-lg border border-edge bg-panel p-1 shadow-xl">
           <button
             type="button"

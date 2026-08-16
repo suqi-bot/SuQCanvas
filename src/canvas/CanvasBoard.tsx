@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background,
   BackgroundVariant,
@@ -9,12 +9,14 @@ import {
   ReactFlowProvider,
   SelectionMode,
   useReactFlow,
+  useStoreApi,
   type NodeTypes,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCanvasStore } from '../store/canvasStore'
 import { useProjectStore } from '../store/projectStore'
 import { useUiStore } from '../store/uiStore'
+import type { ToolMode } from '../store/uiStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useLanStore } from '../store/lanStore'
 import {
@@ -42,7 +44,11 @@ function BoardInner() {
   const setViewport = useCanvasStore((s) => s.setViewport)
   const { screenToFlowPosition, setViewport: rfSetViewport, fitView, zoomIn, zoomOut, setCenter } =
     useReactFlow()
+  const storeApi = useStoreApi()
   const [dragging, setDragging] = useState(false)
+  const tool = useUiStore((s) => s.tool)
+  const setTool = useUiStore((s) => s.setTool)
+  const tempPanRef = useRef<ToolMode | null>(null)
 
   const projectId = useProjectStore((s) => s.projectId)
   const theme = useSettingsStore((s) => s.theme)
@@ -103,6 +109,49 @@ function BoardInner() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [fitView])
+
+  // 工具切换快捷键：V 选中 / C 连线 / H 拖动；按住空格临时平移
+  useEffect(() => {
+    const isTypingTarget = () => {
+      const t = document.activeElement
+      return (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        (t instanceof HTMLElement && t.isContentEditable)
+      )
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget()) return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const k = e.key.toLowerCase()
+      if (k === 'v') {
+        e.preventDefault()
+        setTool('select')
+      } else if (k === 'c') {
+        e.preventDefault()
+        setTool('connect')
+      } else if (k === 'h') {
+        e.preventDefault()
+        setTool('drag')
+      } else if (e.key === ' ' && tempPanRef.current === null) {
+        e.preventDefault()
+        tempPanRef.current = useUiStore.getState().tool
+        setTool('drag')
+      }
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== ' ' || tempPanRef.current === null) return
+      e.preventDefault()
+      setTool(tempPanRef.current)
+      tempPanRef.current = null
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [setTool])
 
   const nodeTypes = useMemo<NodeTypes>(() => mediaNodeTypes, [])
   const edgeTypes = useMemo(() => styledEdgeTypes, [])
@@ -240,8 +289,14 @@ function BoardInner() {
       defaultViewport={{ x: 0, y: 0, zoom: 1 }}
       minZoom={MIN_ZOOM}
       maxZoom={MAX_ZOOM}
-      panOnDrag={[1]}
-      selectionOnDrag
+      panOnDrag={tool === 'drag' ? true : [1]}
+      selectionOnDrag={tool === 'select'}
+      nodesDraggable={tool === 'select'}
+      elementsSelectable={tool !== 'drag'}
+      nodesConnectable={tool !== 'drag'}
+      connectOnClick={tool !== 'drag'}
+      connectionRadius={tool === 'connect' ? 300 : 20}
+      onPaneClick={() => storeApi.setState({ connectionClickStartHandle: null })}
       selectionMode={SelectionMode.Partial}
       zoomOnScroll
       zoomOnPinch
@@ -251,7 +306,9 @@ function BoardInner() {
       onDrop={onDrop}
       colorMode={theme}
       proOptions={{ hideAttribution: false }}
-      className={dragging ? 'sq-drag-active' : ''}
+      className={`${dragging ? 'sq-drag-active' : ''} ${
+        tool === 'connect' ? 'sq-connect-mode' : ''
+      } ${tool === 'drag' ? 'sq-drag-mode' : ''}`}
     >
       <Background
         variant={BackgroundVariant.Dots}
@@ -290,7 +347,9 @@ function EmptyHint() {
           <br />
           或双击空白处添加文本
           <br />
-          <span className="text-faint">中键拖动视角 · 滚轮缩放</span>
+          <span className="text-faint">
+            滚轮缩放 · V 选中 · C 连线 · H 拖动 · 空格临时平移
+          </span>
         </div>
       </div>
     </div>

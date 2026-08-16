@@ -14,6 +14,9 @@ lan-deploy.zip
 dist-ssr
 *.local
 
+# pdfjs static assets (copied by predev/prebuild)
+public/pdfjs
+
 # Environment
 .env
 .env.*

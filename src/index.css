@@ -167,6 +167,93 @@ body {
   box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.9);
 }
 
+.sq-connect-mode .react-flow__pane {
+  cursor: crosshair;
+}
+
+.sq-connect-mode .sq-handle {
+  width: 18px !important;
+  height: 18px !important;
+  opacity: 1 !important;
+}
+
+.sq-connect-mode .sq-handle:hover {
+  background: #0ea5e9 !important;
+}
+
+/* 连线模式：四条边为连接热区，点击/拖动对应边即可引线 */
+.sq-connect-mode .sq-handle.sq-handle-strip {
+  border-radius: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  opacity: 0 !important;
+}
+
+.sq-connect-mode .sq-handle.sq-handle-strip.sq-handle-source {
+  z-index: 5;
+}
+
+.sq-connect-mode .sq-handle.sq-handle-strip.sq-handle-target {
+  z-index: 6;
+}
+
+.sq-connect-mode .sq-handle.sq-handle-strip.react-flow__handle-top {
+  left: 0 !important;
+  top: 0 !important;
+  width: 100% !important;
+  height: 24px !important;
+  transform: none !important;
+}
+
+.sq-connect-mode .sq-handle.sq-handle-strip.react-flow__handle-right {
+  right: 0 !important;
+  top: 0 !important;
+  width: 24px !important;
+  height: 100% !important;
+  transform: none !important;
+}
+
+.sq-connect-mode .sq-handle.sq-handle-strip.react-flow__handle-bottom {
+  left: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 24px !important;
+  transform: none !important;
+}
+
+.sq-connect-mode .sq-handle.sq-handle-strip.react-flow__handle-left {
+  left: 0 !important;
+  top: 0 !important;
+  width: 24px !important;
+  height: 100% !important;
+  transform: none !important;
+}
+
+/* 悬停节点时提示可连线的边 */
+.sq-connect-mode .media-shell:hover .sq-handle.sq-handle-strip {
+  opacity: 1 !important;
+  background: rgba(56, 189, 248, 0.12) !important;
+}
+
+/* 拖拽连线和有效目标的高亮 */
+.sq-connect-mode .sq-handle.sq-handle-strip.connectingfrom,
+.sq-connect-mode .sq-handle.sq-handle-strip.connectingto.valid {
+  opacity: 1 !important;
+  background: rgba(56, 189, 248, 0.4) !important;
+}
+
+.sq-connect-mode .media-shell:hover {
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.45);
+}
+
+.sq-drag-mode .react-flow__pane {
+  cursor: grab;
+}
+
+.sq-drag-mode .react-flow__pane:active {
+  cursor: grabbing;
+}
+
 .sq-drag-active .react-flow__pane {
   cursor: copy;
 }
