@@ -406,7 +406,9 @@ export function HomePage() {
   const renameProject = useProjectStore((s) => s.renameProject)
   const theme = useSettingsStore((s) => s.theme)
   const toggleTheme = useSettingsStore((s) => s.toggleTheme)
+  const initialized = useProjectStore((s) => s.initialized)
   const user = useAuthStore((s) => s.user)
+  const guest = useAuthStore((s) => s.guest)
   const signOut = useAuthStore((s) => s.signOut)
   const [projects, setProjects] = useState<ProjectRecord[]>([])
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -418,8 +420,8 @@ export function HomePage() {
   }, [])
 
   useEffect(() => {
-    if (open) void refresh()
-  }, [open, refresh])
+    if (open && initialized) void refresh()
+  }, [open, initialized, refresh])
 
   if (!open) return null
 
@@ -517,12 +519,16 @@ export function HomePage() {
             </span>
           )}
           <div className="flex-1" />
-          {user && (
+          {user ? (
             <span
               className="max-w-48 truncate rounded bg-sky-500/10 px-2 py-1 text-xs text-sky-400"
               title={user.email ?? ''}
             >
               {user.email}
+            </span>
+          ) : (
+            <span className="rounded bg-violet-500/15 px-2 py-1 text-xs text-violet-400">
+              局域网模式
             </span>
           )}
           <button
@@ -530,7 +536,7 @@ export function HomePage() {
             onClick={() => void signOut()}
             className="rounded-md border border-edge2 px-3 py-1.5 text-xs text-soft hover:bg-hover"
           >
-            退出登录
+            {guest ? '返回登录' : '退出登录'}
           </button>
           <button
             type="button"
@@ -569,7 +575,11 @@ export function HomePage() {
           全部项目（{projects.length}）
         </div>
 
-        {projects.length === 0 ? (
+        {!initialized ? (
+          <div className="rounded-2xl border border-edge bg-panel py-16 text-center text-sm text-dim">
+            项目加载中…
+          </div>
+        ) : projects.length === 0 ? (
           <div className="rounded-2xl border border-edge bg-panel py-16 text-center text-sm text-dim">
             暂无项目，点击上方「新建项目」开始
           </div>

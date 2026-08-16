@@ -7,10 +7,12 @@ import { useCanvasStore } from './canvasStore'
 
 interface AuthState {
   user: User | null
+  guest: boolean
   loading: boolean
   init: () => Promise<void>
   signIn: (email: string, password: string) => Promise<string | null>
   signOut: () => Promise<void>
+  enterGuest: () => void
 }
 
 function translateAuthError(err: AuthError): string {
@@ -26,6 +28,7 @@ let listenerInstalled = false
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
+  guest: false,
   loading: true,
 
   init: async () => {
@@ -62,6 +65,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     })
     useCanvasStore.getState().reset()
     useCanvasStore.getState().clearHistory()
-    set({ user: null })
+    set({ user: null, guest: false })
+  },
+
+  enterGuest: () => {
+    set({ guest: true, loading: false })
   },
 }))

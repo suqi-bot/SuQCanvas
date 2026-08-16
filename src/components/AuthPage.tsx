@@ -7,6 +7,7 @@ const inputCls =
 
 export function AuthPage() {
   const signIn = useAuthStore((s) => s.signIn)
+  const enterGuest = useAuthStore((s) => s.enterGuest)
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -90,6 +91,18 @@ export function AuthPage() {
               >
                 注册
               </button>
+            </div>
+            <div className="border-t border-edge pt-4">
+              <button
+                type="button"
+                onClick={enterGuest}
+                className="w-full rounded-lg border border-edge2 py-2 text-sm text-soft transition-colors hover:bg-hover hover:text-main"
+              >
+                以局域网模式进入（无需登录）
+              </button>
+              <p className="mt-2 text-center text-[11px] leading-relaxed text-dim">
+                数据仅保存在本机，可通过局域网中继与其他设备协作
+              </p>
             </div>
           </form>
         ) : (

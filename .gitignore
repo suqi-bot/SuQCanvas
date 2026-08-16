@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist.zip
+lan-deploy.zip
 dist-ssr
 *.local
 

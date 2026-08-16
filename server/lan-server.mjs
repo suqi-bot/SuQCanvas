@@ -29,7 +29,7 @@ function sendTo(ws, obj) {
 
 function broadcast(obj, exceptWs) {
   const data = JSON.stringify(obj)
-  for (const [ws, info] of clients) {
+  for (const [ws] of clients) {
     if (ws === exceptWs) continue
     if (isOpen(ws)) ws.send(data)
   }

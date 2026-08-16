@@ -21,6 +21,10 @@ async function currentUserId(): Promise<string | null> {
   return data.user?.id ?? null
 }
 
+async function isAuthed(): Promise<boolean> {
+  return (await currentUserId()) !== null
+}
+
 /** 同步素材元数据到云端 assets 表 */
 export async function upsertAssetMetaToCloud(
   meta: { id: string; name: string; mime: string; size: number; kind: MediaKind; hasThumbnail?: boolean },
@@ -53,7 +57,7 @@ export async function deleteAssetFromCloud(id: string): Promise<void> {
 
 /** 按 id 列表查询云端素材 */
 export async function fetchCloudAssets(ids: string[]): Promise<CloudAsset[]> {
-  if (!supabase || ids.length === 0) return []
+  if (!supabase || ids.length === 0 || !(await isAuthed())) return []
   const { data, error } = await supabase.from('assets').select('*').in('id', ids)
   if (error) {
     console.warn('拉取云端素材失败:', error.message)
@@ -99,7 +103,7 @@ function ts(p: { updatedAt?: number; updated_at?: string }): number {
 }
 
 export async function fetchCloudProjects(): Promise<CloudProject[]> {
-  if (!supabase) return []
+  if (!supabase || !(await isAuthed())) return []
   const { data, error } = await supabase.from('projects').select('*')
   if (error) {
     console.warn('拉取云端项目失败:', error.message)
@@ -109,7 +113,7 @@ export async function fetchCloudProjects(): Promise<CloudProject[]> {
 }
 
 export async function fetchCloudProject(id: string): Promise<CloudProject | null> {
-  if (!supabase) return null
+  if (!supabase || !(await isAuthed())) return null
   const { data, error } = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
   if (error) {
     console.warn('拉取云端项目失败:', error.message)

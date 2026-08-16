@@ -12,6 +12,7 @@ import { initLanSync } from './sync/lanClient'
 
 export default function App() {
   const user = useAuthStore((s) => s.user)
+  const guest = useAuthStore((s) => s.guest)
   const loading = useAuthStore((s) => s.loading)
 
   useEffect(() => {
@@ -20,12 +21,13 @@ export default function App() {
     return () => stopLanSync()
   }, [])
 
+  const entered = user || guest
+
   useEffect(() => {
-    if (!user) return
-    void useProjectStore.getState().init().then(() => {
-      useUiStore.getState().setHomeOpen(true)
-    })
-  }, [user])
+    if (!entered) return
+    useUiStore.getState().setHomeOpen(true)
+    void useProjectStore.getState().init()
+  }, [entered])
 
   if (loading) {
     return (
@@ -34,7 +36,7 @@ export default function App() {
       </div>
     )
   }
-  if (!user) return <AuthPage />
+  if (!entered) return <AuthPage />
 
   return (
     <div className="flex h-full flex-col bg-app text-main">

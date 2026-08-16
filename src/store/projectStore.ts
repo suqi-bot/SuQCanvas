@@ -79,30 +79,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         saveStatus: 'saved',
       })
     } else {
-      const now = Date.now()
-      const id = genUuid()
-      await db.projects.add({
-        id,
-        name: '未命名项目',
-        createdAt: now,
-        updatedAt: now,
-        graph: { nodes: [], edges: [] },
-        viewport: { x: 0, y: 0, zoom: 1 },
-      })
-      await upsertProjectToCloud({
-        id,
-        name: '未命名项目',
-        createdAt: now,
-        updatedAt: now,
-        graph: { nodes: [], edges: [] },
-        viewport: { x: 0, y: 0, zoom: 1 },
-      })
+      useCanvasStore.getState().reset()
+      useCanvasStore.getState().clearHistory()
       set({
-        projectId: id,
+        projectId: null,
         projectName: '未命名项目',
-        loaded: true,
+        loaded: false,
         initialized: true,
-        saveStatus: 'saved',
+        saveStatus: 'idle',
       })
     }
     installAutosave()

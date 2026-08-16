@@ -100,13 +100,22 @@ export async function uploadThumbToOss(assetId: string, blob: Blob): Promise<str
   return key
 }
 
+/** ali-oss 浏览器版 get() 返回 Buffer（Uint8Array），统一转成 Blob */
+function toBlob(content: unknown): Blob | null {
+  if (content instanceof Blob) return content
+  if (content instanceof ArrayBuffer) return new Blob([content])
+  if (content instanceof Uint8Array) return new Blob([new Uint8Array(content)])
+  if (typeof content === 'string') return new Blob([content])
+  return null
+}
+
 /** 从 OSS 下载媒体文件 */
 export async function downloadAssetFromOss(assetId: string): Promise<Blob | null> {
   const c = await getOssClient()
   if (!c) return null
   try {
     const { content } = await c.get(assetKey(assetId))
-    return content as unknown as Blob
+    return toBlob(content)
   } catch (err) {
     console.warn('从 OSS 下载失败:', assetId, err)
     return null
@@ -117,7 +126,10 @@ export async function downloadAssetFromOss(assetId: string): Promise<Blob | null
 export async function getOssThumb(assetId: string): Promise<{ content: Blob }> {
   const c = await getOssClient()
   if (!c) throw new Error('OSS 未配置')
-  return (await c.get(thumbKey(assetId))) as { content: Blob }
+  const { content } = await c.get(thumbKey(assetId))
+  const blob = toBlob(content)
+  if (!blob) throw new Error('OSS 缩略图格式异常')
+  return { content: blob }
 }
 
 /** 获取 OSS 媒体文件可访问 URL（私有桶为签名 URL，默认 1 小时有效） */
