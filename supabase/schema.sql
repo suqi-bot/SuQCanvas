@@ -76,10 +76,14 @@ create policy "own assets"
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
--- ---------- 可选：历史匿名数据归属 ----------
+-- ---------- 可选：历史匿名数据处理 ----------
 -- 升级前产生的旧数据 user_id 为 null，登录后不可见。
--- 如需把旧数据划归某个账号，在 Supabase 的 Auth -> Users 里复制该用户 UUID，
--- 然后执行（替换 <user-uuid>）：
+-- 方案一：把旧数据划归某个账号（Auth -> Users 里复制该用户 UUID）：
+--   update public.projects set user_id = '<user-uuid>' where user_id is null;
+--   update public.assets  set user_id = '<user-uuid>' where user_id is null;
 --
--- update public.projects set user_id = '<user-uuid>' where user_id is null;
--- update public.assets  set user_id = '<user-uuid>' where user_id is null;
+-- 方案二：直接清空旧数据（旧项目会从浏览器本地缓存重新上传到当前账号）：
+--   delete from public.projects where user_id is null;
+--   delete from public.assets  where user_id is null;
+--
+-- 注意：不要删除 OSS 里的旧文件（assets/*.bin），本地项目重新上传后仍会引用它们。

@@ -1,5 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import type { Viewport } from '@xyflow/react'
+import { genUuid } from '../utils/uuid'
 import { db } from '../db/db'
 import { useCanvasStore } from '../store/canvasStore'
 import { useProjectStore } from '../store/projectStore'
@@ -143,7 +144,7 @@ export async function importProjectFile(file: File): Promise<void> {
   }
 
   const now = Date.now()
-  const id = crypto.randomUUID()
+  const id = genUuid()
   const projectName = json.project?.name || '导入的项目'
   await db.projects.add({
     id,

@@ -7,6 +7,7 @@ const accessKeySecret = import.meta.env.VITE_OSS_ACCESS_KEY_SECRET as string | u
 const stsUrl = import.meta.env.VITE_OSS_STS_URL as string | undefined
 
 let client: OSS | null = null
+let clientExpiresAt = 0
 
 export function isOssConfigured(): boolean {
   return Boolean(region && bucket && (accessKeyId || stsUrl))
@@ -16,6 +17,7 @@ interface OssCredentials {
   accessKeyId: string
   accessKeySecret: string
   stsToken?: string
+  expiresAt?: number
 }
 
 async function getCredentials(): Promise<OssCredentials> {
@@ -30,14 +32,21 @@ async function getCredentials(): Promise<OssCredentials> {
       accessKeyId: data.accessKeyId,
       accessKeySecret: data.accessKeySecret,
       stsToken: data.securityToken,
+      expiresAt: data.expiration
+        ? new Date(data.expiration).getTime()
+        : Date.now() + 3600 * 1000,
     }
   }
-  return { accessKeyId: accessKeyId as string, accessKeySecret: accessKeySecret as string }
+  return {
+    accessKeyId: accessKeyId as string,
+    accessKeySecret: accessKeySecret as string,
+    expiresAt: Number.POSITIVE_INFINITY,
+  }
 }
 
 export async function getOssClient(): Promise<OSS | null> {
   if (!isOssConfigured()) return null
-  if (client) return client
+  if (client && Date.now() < clientExpiresAt - 5 * 60 * 1000) return client
   const creds = await getCredentials()
   client = new OSS({
     region,
@@ -46,7 +55,19 @@ export async function getOssClient(): Promise<OSS | null> {
     accessKeySecret: creds.accessKeySecret,
     stsToken: creds.stsToken,
     secure: true,
+    refreshSTSToken: creds.stsToken
+      ? async () => {
+          const fresh = await getCredentials()
+          return {
+            accessKeyId: fresh.accessKeyId,
+            accessKeySecret: fresh.accessKeySecret,
+            stsToken: fresh.stsToken ?? '',
+          }
+        }
+      : undefined,
+    refreshSTSTokenInterval: 300000,
   })
+  clientExpiresAt = creds.expiresAt ?? Date.now() + 3600 * 1000
   return client
 }
 

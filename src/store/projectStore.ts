@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { db } from '../db/db'
 import { useCanvasStore } from './canvasStore'
 import { toast } from './uiStore'
+import { genUuid } from '../utils/uuid'
 import {
   loadProjectBest,
   syncProjectList,
@@ -79,7 +80,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       })
     } else {
       const now = Date.now()
-      const id = crypto.randomUUID()
+      const id = genUuid()
       await db.projects.add({
         id,
         name: '未命名项目',
@@ -133,7 +134,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     useCanvasStore.getState().reset()
     useCanvasStore.getState().clearHistory()
     const now = Date.now()
-    const id = crypto.randomUUID()
+    const id = genUuid()
     const record = {
       id,
       name,
