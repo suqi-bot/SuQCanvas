@@ -73,7 +73,7 @@ const ALIGN_BUTTONS: { mode: AlignMode; title: string; icon: (props: React.SVGPr
 ]
 
 const TOOL_ITEMS: { mode: ToolMode; label: string; shortcut: string; icon: (props: React.SVGProps<SVGSVGElement>) => React.ReactNode }[] = [
-  { mode: 'select', label: '选中', shortcut: 'V', icon: SelectIcon },
+  { mode: 'select', label: '选择', shortcut: 'V', icon: SelectIcon },
   { mode: 'connect', label: '连线', shortcut: 'C', icon: ConnectIcon },
   { mode: 'drag', label: '拖动', shortcut: 'H', icon: DragIcon },
 ]

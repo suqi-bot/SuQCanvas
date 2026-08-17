@@ -76,7 +76,10 @@ wss.on('connection', (ws, req) => {
       msg.t === 'viewport' ||
       msg.t === 'asset-meta' ||
       msg.t === 'asset-request' ||
-      msg.t === 'asset-chunk'
+      msg.t === 'asset-chunk' ||
+      msg.t === 'project-list' ||
+      msg.t === 'project-data-request' ||
+      msg.t === 'project-data'
     ) {
       msg.from = info.id
       const target = msg.to ? [...clients.entries()].find(([, c]) => c.id === msg.to) : null

@@ -9,6 +9,7 @@ import {
   updateProjectNameInCloud,
   upsertProjectToCloud,
 } from '../sync/cloudSync'
+import { broadcastLocalProjects } from '../sync/lanClient'
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -18,6 +19,8 @@ interface ProjectState {
   loaded: boolean
   initialized: boolean
   saveStatus: SaveStatus
+  busy: boolean
+  setBusy: (busy: boolean) => void
   init: () => Promise<void>
   loadProject: (id: string) => Promise<void>
   newProject: (name?: string) => Promise<void>
@@ -59,88 +62,113 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   loaded: false,
   initialized: false,
   saveStatus: 'idle',
+  busy: false,
+
+  setBusy: (busy) => {
+    set({ busy })
+  },
 
   init: async () => {
     if (get().initialized) return
-    const list = await syncProjectList()
-    const latest = list[0]
-    if (latest) {
-      useCanvasStore.setState({
-        nodes: latest.graph.nodes,
-        edges: latest.graph.edges,
-        viewport: latest.viewport,
-      })
-      useCanvasStore.getState().clearHistory()
-      set({
-        projectId: latest.id,
-        projectName: latest.name,
-        loaded: true,
-        initialized: true,
-        saveStatus: 'saved',
-      })
-    } else {
-      useCanvasStore.getState().reset()
-      useCanvasStore.getState().clearHistory()
-      set({
-        projectId: null,
-        projectName: '未命名项目',
-        loaded: false,
-        initialized: true,
-        saveStatus: 'idle',
-      })
+    set({ busy: true })
+    try {
+      const list = await syncProjectList()
+      const latest = list[0]
+      if (latest) {
+        useCanvasStore.setState({
+          nodes: latest.graph.nodes,
+          edges: latest.graph.edges,
+          viewport: latest.viewport,
+        })
+        useCanvasStore.getState().clearHistory()
+        set({
+          projectId: latest.id,
+          projectName: latest.name,
+          loaded: true,
+          initialized: true,
+          saveStatus: 'saved',
+        })
+      } else {
+        useCanvasStore.getState().reset()
+        useCanvasStore.getState().clearHistory()
+        set({
+          projectId: null,
+          projectName: '未命名项目',
+          loaded: false,
+          initialized: true,
+          saveStatus: 'idle',
+        })
+      }
+      installAutosave()
+    } finally {
+      set({ busy: false })
     }
-    installAutosave()
   },
 
   loadProject: async (id) => {
-    const record = await loadProjectBest(id)
-    if (!record) {
-      toast('项目不存在', 'error')
-      return
+    set({ busy: true })
+    try {
+      const record = await loadProjectBest(id)
+      if (!record) {
+        toast('项目不存在', 'error')
+        return
+      }
+      if (get().loaded) await get().saveNow()
+      useCanvasStore.setState({
+        nodes: record.graph.nodes,
+        edges: record.graph.edges,
+        viewport: record.viewport,
+      })
+      useCanvasStore.getState().clearHistory()
+      set({
+        projectId: id,
+        projectName: record.name,
+        loaded: true,
+        saveStatus: 'saved',
+      })
+    } catch (err) {
+      console.error('打开项目失败', err)
+      toast('打开项目失败', 'error')
+    } finally {
+      set({ busy: false })
     }
-    if (get().loaded) await get().saveNow()
-    useCanvasStore.setState({
-      nodes: record.graph.nodes,
-      edges: record.graph.edges,
-      viewport: record.viewport,
-    })
-    useCanvasStore.getState().clearHistory()
-    set({
-      projectId: id,
-      projectName: record.name,
-      loaded: true,
-      saveStatus: 'saved',
-    })
   },
 
   newProject: async (name = '未命名项目') => {
-    if (get().loaded) await get().saveNow()
-    useCanvasStore.getState().reset()
-    useCanvasStore.getState().clearHistory()
-    const now = Date.now()
-    const id = genUuid()
-    const record = {
-      id,
-      name,
-      createdAt: now,
-      updatedAt: now,
-      graph: { nodes: [], edges: [] },
-      viewport: { x: 0, y: 0, zoom: 1 },
+    set({ busy: true })
+    try {
+      if (get().loaded) await get().saveNow()
+      useCanvasStore.getState().reset()
+      useCanvasStore.getState().clearHistory()
+      const now = Date.now()
+      const id = genUuid()
+      const record = {
+        id,
+        name,
+        createdAt: now,
+        updatedAt: now,
+        graph: { nodes: [], edges: [] },
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }
+      await db.projects.add(record)
+      await upsertProjectToCloud(record)
+      set({
+        projectId: id,
+        projectName: name,
+        loaded: true,
+        saveStatus: 'saved',
+      })
+      void broadcastLocalProjects()
+    } finally {
+      set({ busy: false })
     }
-    await db.projects.add(record)
-    await upsertProjectToCloud(record)
-    set({
-      projectId: id,
-      projectName: name,
-      loaded: true,
-      saveStatus: 'saved',
-    })
   },
 
   renameProject: async (id, name) => {
     await db.projects.update(id, { name })
     await updateProjectNameInCloud(id, name)
     if (get().projectId === id) set({ projectName: name })
+    void broadcastLocalProjects()
   },
 
   saveNow: async () => {
@@ -165,6 +193,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       })
       await upsertProjectToCloud(record)
       set({ saveStatus: 'saved' })
+      void broadcastLocalProjects()
     } catch (err) {
       console.error('保存失败', err)
       set({ saveStatus: 'error' })

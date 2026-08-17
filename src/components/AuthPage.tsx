@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { isCloudConfigured } from '../sync/supabaseClient'
+import { lanConnect } from '../sync/lanClient'
 
 const inputCls =
   'w-full rounded-lg border border-edge2 bg-panel2 px-3 py-2 text-sm text-main outline-none placeholder:text-dim focus:border-sky-500'
@@ -13,10 +14,20 @@ export function AuthPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [lanUrl, setLanUrl] = useState('ws://192.168.1.100:8790')
+  const [lanName, setLanName] = useState('')
 
   const switchMode = (m: 'login' | 'register') => {
     setMode(m)
     setError(null)
+  }
+
+  const handleEnterLan = () => {
+    const url = lanUrl.trim()
+    if (url) {
+      lanConnect(url, lanName.trim() || `设备-${Math.random().toString(36).slice(2, 6)}`)
+    }
+    enterGuest()
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -93,15 +104,30 @@ export function AuthPage() {
               </button>
             </div>
             <div className="border-t border-edge pt-4">
+              <div className="mb-2 text-center text-xs text-dim">或使用局域网模式（无需登录）</div>
+              <div className="space-y-2">
+                <input
+                  value={lanUrl}
+                  onChange={(e) => setLanUrl(e.target.value)}
+                  placeholder="ws://192.168.1.100:8790"
+                  className={inputCls}
+                />
+                <input
+                  value={lanName}
+                  onChange={(e) => setLanName(e.target.value)}
+                  placeholder="你的昵称（默认自动生成）"
+                  className={inputCls}
+                />
+              </div>
               <button
                 type="button"
-                onClick={enterGuest}
-                className="w-full rounded-lg border border-edge2 py-2 text-sm text-soft transition-colors hover:bg-hover hover:text-main"
+                onClick={handleEnterLan}
+                className="mt-3 w-full rounded-lg border border-edge2 py-2 text-sm text-soft transition-colors hover:bg-hover hover:text-main"
               >
-                以局域网模式进入（无需登录）
+                连接并进入局域网模式
               </button>
               <p className="mt-2 text-center text-[11px] leading-relaxed text-dim">
-                数据仅保存在本机，可通过局域网中继与其他设备协作
+                输入中继服务器地址后进入，素材与画布操作将实时同步到所有连接设备，数据仅保存在本机
               </p>
             </div>
           </form>

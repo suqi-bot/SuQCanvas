@@ -26,14 +26,17 @@ function translateAuthError(err: AuthError): string {
 
 let listenerInstalled = false
 
-export const useAuthStore = create<AuthState>((set) => ({
+const GUEST_KEY = 'sq:guest'
+
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   guest: false,
   loading: true,
 
   init: async () => {
+    const persistedGuest = localStorage.getItem(GUEST_KEY) === '1'
     if (!supabase) {
-      set({ loading: false })
+      set({ guest: persistedGuest, loading: false })
       return
     }
     if (!listenerInstalled) {
@@ -43,7 +46,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       })
     }
     const { data } = await supabase.auth.getSession()
-    set({ user: data.session?.user ?? null, loading: false })
+    const user = data.session?.user ?? null
+    set({ user, guest: user ? false : persistedGuest, loading: false })
   },
 
   signIn: async (email, password) => {
@@ -53,9 +57,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
+    const wasGuest = get().guest
     if (supabase) await supabase.auth.signOut()
-    await db.projects.clear()
-    await db.assets.clear()
+    // 只有退出真实云账号时才清理本地缓存（避免不同账号间数据串入云端）；
+    // 退出局域网/游客模式时保留本地项目，防止数据丢失
+    if (!wasGuest) {
+      await db.projects.clear()
+      await db.assets.clear()
+    }
     useProjectStore.setState({
       projectId: null,
       projectName: '未命名项目',
@@ -65,10 +74,12 @@ export const useAuthStore = create<AuthState>((set) => ({
     })
     useCanvasStore.getState().reset()
     useCanvasStore.getState().clearHistory()
+    localStorage.removeItem(GUEST_KEY)
     set({ user: null, guest: false })
   },
 
   enterGuest: () => {
+    localStorage.setItem(GUEST_KEY, '1')
     set({ guest: true, loading: false })
   },
 }))

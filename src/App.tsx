@@ -8,15 +8,16 @@ import { AuthPage } from './components/AuthPage'
 import { useProjectStore } from './store/projectStore'
 import { useUiStore } from './store/uiStore'
 import { useAuthStore } from './store/authStore'
-import { initLanSync } from './sync/lanClient'
+import { initLanSync, autoReconnectLan } from './sync/lanClient'
 
 export default function App() {
   const user = useAuthStore((s) => s.user)
   const guest = useAuthStore((s) => s.guest)
   const loading = useAuthStore((s) => s.loading)
+  const busy = useProjectStore((s) => s.busy)
 
   useEffect(() => {
-    void useAuthStore.getState().init()
+    void useAuthStore.getState().init().then(() => autoReconnectLan())
     const stopLanSync = initLanSync()
     return () => stopLanSync()
   }, [])
@@ -47,6 +48,14 @@ export default function App() {
       <HomePage />
       <PdfViewerModal />
       <Toasts />
+      {busy && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--overlay)]">
+          <div className="flex items-center gap-3 rounded-xl border border-edge bg-panel px-6 py-4 shadow-2xl">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+            <span className="text-sm text-soft">项目加载中…</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

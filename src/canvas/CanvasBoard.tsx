@@ -110,7 +110,7 @@ function BoardInner() {
     return () => window.removeEventListener('keydown', onKey)
   }, [fitView])
 
-  // 工具切换快捷键：V 选中 / C 连线 / H 拖动；按住空格临时平移
+  // 工具切换快捷键：V 选择 / C 连线 / H 拖动；按住空格临时平移
   useEffect(() => {
     const isTypingTarget = () => {
       const t = document.activeElement
@@ -306,9 +306,11 @@ function BoardInner() {
       onDrop={onDrop}
       colorMode={theme}
       proOptions={{ hideAttribution: false }}
-      className={`${dragging ? 'sq-drag-active' : ''} ${
-        tool === 'connect' ? 'sq-connect-mode' : ''
-      } ${tool === 'drag' ? 'sq-drag-mode' : ''}`}
+className={`${dragging ? 'sq-drag-active' : ''} ${
+  tool === 'select' ? 'sq-select-mode' : ''
+} ${tool === 'connect' ? 'sq-connect-mode' : ''} ${
+  tool === 'drag' ? 'sq-drag-mode' : ''
+}`}
     >
       <Background
         variant={BackgroundVariant.Dots}
@@ -348,7 +350,7 @@ function EmptyHint() {
           或双击空白处添加文本
           <br />
           <span className="text-faint">
-            滚轮缩放 · V 选中 · C 连线 · H 拖动 · 空格临时平移
+            滚轮缩放 · V 选择 · C 连线 · H 拖动 · 空格临时平移
           </span>
         </div>
       </div>

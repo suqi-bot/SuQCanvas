@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { db, gcAssets } from '../db/db'
 import type { ProjectRecord } from '../db/db'
 import { useProjectStore } from '../store/projectStore'
@@ -10,6 +10,8 @@ import { deleteProjectFromCloud, syncProjectList } from '../sync/cloudSync'
 import { isCloudConfigured } from '../sync/supabaseClient'
 import { isOssConfigured } from '../sync/ossClient'
 import { useAuthStore } from '../store/authStore'
+import { useLanStore } from '../store/lanStore'
+import { broadcastLocalProjects, fetchProjectFromLan } from '../sync/lanClient'
 import { STICKY_COLORS, type StickyColor, type SuqEdge, type SuqNode } from '../types'
 import type { Theme } from '../store/settingsStore'
 import { MoonIcon, PlusIcon, SunIcon } from '../canvas/nodes/Icons'
@@ -403,6 +405,8 @@ export function HomePage() {
   const currentId = useProjectStore((s) => s.projectId)
   const newProject = useProjectStore((s) => s.newProject)
   const loadProject = useProjectStore((s) => s.loadProject)
+  const busy = useProjectStore((s) => s.busy)
+  const setBusy = useProjectStore((s) => s.setBusy)
   const renameProject = useProjectStore((s) => s.renameProject)
   const theme = useSettingsStore((s) => s.theme)
   const toggleTheme = useSettingsStore((s) => s.toggleTheme)
@@ -414,6 +418,7 @@ export function HomePage() {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const importRef = useRef<HTMLInputElement | null>(null)
+  const remoteProjects = useLanStore((s) => s.remoteProjects)
 
   const refresh = useCallback(async () => {
     setProjects(await syncProjectList())
@@ -421,7 +426,31 @@ export function HomePage() {
 
   useEffect(() => {
     if (open && initialized) void refresh()
-  }, [open, initialized, refresh])
+  }, [open, initialized, refresh, remoteProjects])
+
+  const remoteIdSet = useMemo(() => new Set(remoteProjects.map((r) => r.id)), [remoteProjects])
+
+  /** 本地列表不含该 id 且局域网中存在 → 视为远端项目 */
+  const isRemoteId = (id: string) =>
+    remoteIdSet.has(id) && !projects.some((p) => p.id === id)
+
+  /** 展示列表 = 本地项目 + 局域网远端项目（本地没有的） */
+  const visibleProjects = useMemo(() => {
+    const merged = [...projects]
+    for (const r of remoteProjects) {
+      if (!merged.some((p) => p.id === r.id)) {
+        merged.push({
+          id: r.id,
+          name: r.name,
+          createdAt: 0,
+          updatedAt: r.updatedAt,
+          graph: { nodes: [], edges: [] },
+          viewport: { x: 0, y: 0, zoom: 1 },
+        })
+      }
+    }
+    return merged.sort((a, b) => b.updatedAt - a.updatedAt)
+  }, [projects, remoteProjects])
 
   if (!open) return null
 
@@ -430,34 +459,53 @@ export function HomePage() {
     setOpen(false)
   }
 
-  const handleOpen = (p: ProjectRecord) => {
+  const handleOpen = async (p: ProjectRecord) => {
+    if (isRemoteId(p.id)) {
+      const rec = await fetchProjectFromLan(p.id)
+      if (!rec) {
+        toast('无法从局域网获取该项目，设备可能已离线', 'error')
+        return
+      }
+      await db.projects.put(rec)
+      void broadcastLocalProjects()
+      await refresh()
+    }
     if (p.id !== currentId) {
-      void loadProject(p.id)
+      await loadProject(p.id)
     }
     setOpen(false)
   }
 
   const handleDelete = async (p: ProjectRecord) => {
     if (!window.confirm(`确定删除项目「${p.name}」吗？其中的媒体文件也会被清理。`)) return
-    await db.projects.delete(p.id)
-    await deleteProjectFromCloud(p.id)
-    await gcAssets()
-    if (currentId === p.id) {
-      const remaining = (await syncProjectList())[0]
-      if (remaining) {
-        await loadProject(remaining.id)
-      } else {
-        useCanvasStore.getState().reset()
-        useCanvasStore.getState().clearHistory()
-        useProjectStore.setState({
-          projectId: null,
-          projectName: '未命名项目',
-          loaded: false,
-          saveStatus: 'idle',
-        })
+    setBusy(true)
+    try {
+      await db.projects.delete(p.id)
+      await deleteProjectFromCloud(p.id)
+      await gcAssets()
+      if (currentId === p.id) {
+        const remaining = (await syncProjectList())[0]
+        if (remaining) {
+          await loadProject(remaining.id)
+        } else {
+          useCanvasStore.getState().reset()
+          useCanvasStore.getState().clearHistory()
+          useProjectStore.setState({
+            projectId: null,
+            projectName: '未命名项目',
+            loaded: false,
+            saveStatus: 'idle',
+          })
+        }
       }
+      await refresh()
+    } catch (err) {
+      console.error('删除项目失败', err)
+      toast('删除项目失败', 'error')
+    } finally {
+      setBusy(false)
     }
-    await refresh()
+    void broadcastLocalProjects()
   }
 
   const handleExport = async (p: ProjectRecord) => {
@@ -541,7 +589,8 @@ export function HomePage() {
           <button
             type="button"
             onClick={() => importRef.current?.click()}
-            className="rounded-md border border-edge2 px-3 py-1.5 text-xs text-soft hover:bg-hover"
+            disabled={busy}
+            className="rounded-md border border-edge2 px-3 py-1.5 text-xs text-soft hover:bg-hover disabled:cursor-wait disabled:opacity-50"
           >
             导入 .sqcanvas
           </button>
@@ -559,7 +608,8 @@ export function HomePage() {
           <button
             type="button"
             onClick={() => void handleNew()}
-            className="group flex w-full items-center gap-4 rounded-2xl border-2 border-dashed border-edge2 bg-panel px-6 py-5 transition-colors hover:border-sky-500/60 hover:bg-hover/40"
+            disabled={busy}
+            className="group flex w-full items-center gap-4 rounded-2xl border-2 border-dashed border-edge2 bg-panel px-6 py-5 transition-colors hover:border-sky-500/60 hover:bg-hover/40 disabled:cursor-wait disabled:opacity-60 disabled:hover:border-edge2 disabled:hover:bg-panel"
           >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-600/15 text-sky-500 transition-colors group-hover:bg-sky-600 group-hover:text-white">
               <PlusIcon className="text-lg" />
@@ -572,20 +622,20 @@ export function HomePage() {
         </div>
 
         <div className="mb-3 text-xs font-medium uppercase tracking-wider text-dim">
-          全部项目（{projects.length}）
+          全部项目（{visibleProjects.length}）
         </div>
 
         {!initialized ? (
           <div className="rounded-2xl border border-edge bg-panel py-16 text-center text-sm text-dim">
             项目加载中…
           </div>
-        ) : projects.length === 0 ? (
+        ) : visibleProjects.length === 0 ? (
           <div className="rounded-2xl border border-edge bg-panel py-16 text-center text-sm text-dim">
             暂无项目，点击上方「新建项目」开始
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 pb-8 sm:grid-cols-2 lg:grid-cols-3">
-            {projects.map((p) => (
+            {visibleProjects.map((p) => (
               <div
                 key={p.id}
                 className={`group flex flex-col overflow-hidden rounded-2xl border bg-panel transition-colors hover:border-sky-500/50 ${
@@ -594,14 +644,20 @@ export function HomePage() {
               >
                 <button
                   type="button"
-                  onClick={() => handleOpen(p)}
-                  className="relative h-36 w-full cursor-pointer bg-panel2/50 p-1.5"
+                  onClick={() => void handleOpen(p)}
+                  disabled={busy}
+                  className="relative h-36 w-full cursor-pointer bg-panel2/50 p-1.5 disabled:cursor-wait"
                   title={`打开「${p.name}」`}
                 >
                   <ProjectThumb nodes={p.graph.nodes} edges={p.graph.edges} theme={theme} />
                   {p.id === currentId && (
                     <span className="absolute right-2 top-2 rounded bg-sky-600/80 px-1.5 py-0.5 text-[10px] text-white">
                       当前
+                    </span>
+                  )}
+                  {isRemoteId(p.id) && (
+                    <span className="absolute bottom-2 right-2 rounded bg-violet-600/80 px-1.5 py-0.5 text-[10px] text-white">
+                      局域网
                     </span>
                   )}
                 </button>
@@ -621,42 +677,46 @@ export function HomePage() {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => handleOpen(p)}
-                      className="min-w-0 flex-1 truncate text-left text-sm font-medium text-soft hover:text-sky-500"
+                      onClick={() => void handleOpen(p)}
+                      disabled={busy}
+                      className="min-w-0 flex-1 truncate text-left text-sm font-medium text-soft hover:text-sky-500 disabled:cursor-wait"
                       title={p.name}
                     >
                       {p.name}
                     </button>
                   )}
-                  <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                    <button
-                      type="button"
-                      title="重命名"
-                      onClick={() => {
-                        setRenaming(p.id)
-                        setRenameValue(p.name)
-                      }}
-                      className="rounded px-1.5 py-1 text-xs text-mid hover:bg-hover hover:text-main"
-                    >
-                      重命名
-                    </button>
-                    <button
-                      type="button"
-                      title="导出"
-                      onClick={() => void handleExport(p)}
-                      className="rounded px-1.5 py-1 text-xs text-mid hover:bg-hover hover:text-main"
-                    >
-                      导出
-                    </button>
-                    <button
-                      type="button"
-                      title="删除"
-                      onClick={() => void handleDelete(p)}
-                      className="rounded px-1.5 py-1 text-xs text-rose-500 hover:bg-hover"
-                    >
-                      删除
-                    </button>
-                  </div>
+                  {!isRemoteId(p.id) && (
+                    <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                      <button
+                        type="button"
+                        title="重命名"
+                        onClick={() => {
+                          setRenaming(p.id)
+                          setRenameValue(p.name)
+                        }}
+                        className="rounded px-1.5 py-1 text-xs text-mid hover:bg-hover hover:text-main"
+                      >
+                        重命名
+                      </button>
+                      <button
+                        type="button"
+                        title="导出"
+                        onClick={() => void handleExport(p)}
+                        className="rounded px-1.5 py-1 text-xs text-mid hover:bg-hover hover:text-main"
+                      >
+                        导出
+                      </button>
+                      <button
+                        type="button"
+                        title="删除"
+                        onClick={() => void handleDelete(p)}
+                        disabled={busy}
+                        className="rounded px-1.5 py-1 text-xs text-rose-500 hover:bg-hover disabled:cursor-wait"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-3 border-t border-edge px-3.5 py-1.5 text-[11px] text-dim">
                   <span>{p.graph.nodes.length} 个元素</span>

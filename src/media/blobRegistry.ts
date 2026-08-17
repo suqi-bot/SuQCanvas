@@ -40,8 +40,12 @@ export async function getAssetUrl(assetId: string): Promise<string> {
     record = await db.assets.get(assetId)
   }
   if (!record || !(record.blob instanceof Blob)) {
-    const ok = await requestAssetFromLan(assetId)
-    if (ok) record = await db.assets.get(assetId)
+    // 局域网资源可能还在传输中，多尝试几次
+    for (let attempt = 0; attempt < 3 && !record; attempt++) {
+      const ok = await requestAssetFromLan(assetId)
+      if (ok) record = await db.assets.get(assetId)
+    }
+    if (!record) record = await db.assets.get(assetId)
   }
   if (!record || !(record.blob instanceof Blob)) throw new Error(`资源不存在: ${assetId}`)
   const url = URL.createObjectURL(record.blob)

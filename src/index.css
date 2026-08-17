@@ -140,6 +140,24 @@ body {
   cursor: grabbing;
 }
 
+/* 选择模式下画布与节点显示默认光标，仅在真正拖动时才变为抓取手势 */
+.sq-select-mode .react-flow__pane,
+.sq-select-mode .react-flow__pane.selection,
+.sq-select-mode .react-flow__node,
+.sq-select-mode .react-flow__node.selectable,
+.sq-select-mode .react-flow__node.draggable,
+.sq-select-mode .react-flow__node.selectable.draggable {
+  cursor: default;
+}
+
+.sq-select-mode .react-flow__pane.dragging,
+.sq-select-mode .react-flow__node.draggable.dragging,
+.sq-select-mode .react-flow__node.selectable.dragging,
+.sq-select-mode .react-flow__node.selectable.draggable.dragging,
+.sq-select-mode .react-flow__node:active {
+  cursor: grabbing;
+}
+
 .sq-handle {
   width: 10px !important;
   height: 10px !important;
