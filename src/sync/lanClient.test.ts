@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { WebSocket } from 'ws'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../db/db'
-import { lanConnect, requestAssetFromLan, bufToB64, b64ToUint8 } from './lanClient'
+import { getDefaultLanUrl, lanConnect, requestAssetFromLan, bufToB64, b64ToUint8, resolveLanUrl } from './lanClient'
 
 // ws 的 WebSocket 与 DOM 类型不同，运行时行为兼容
 globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket
@@ -22,13 +22,13 @@ beforeAll(async () => {
   })
   server.stderr?.on('data', (d) => process.stderr.write(`[server] ${d}`))
   await sleep(400)
-  A = new WebSocket(`ws://127.0.0.1:${PORT}`)
+  A = new WebSocket(`ws://127.0.0.1:${PORT}/lan-ws`)
   await new Promise<void>((res, rej) => {
     A.on('open', () => res())
     A.on('error', rej)
   })
   A.send(JSON.stringify({ t: 'hello', name: 'device-A' }))
-  lanConnect(`ws://127.0.0.1:${PORT}`, 'device-B')
+  lanConnect(`ws://127.0.0.1:${PORT}/lan-ws`, 'device-B')
   await sleep(800)
 }, 15000)
 
@@ -69,6 +69,27 @@ describe('base64 分片往返', () => {
     const src = new Uint8Array([0x58, 0x58, 0x59, 0x59])
     const decoded = decodeChunks(encodeChunks(src))
     expect(Array.from(decoded)).toEqual(Array.from(src))
+  })
+})
+
+describe('LAN 地址解析', () => {
+  it('HTTP IP 部署默认连接同服务器的中继端口', () => {
+    expect(getDefaultLanUrl()).toBe('ws://192.168.1.100:8790')
+  })
+
+  it('HTTPS 页面上的相对地址解析为同源 WSS', () => {
+    expect(resolveLanUrl('/lan-ws', 'https://canvas.example.com/SuQCanvas/')).toBe(
+      'wss://canvas.example.com/lan-ws',
+    )
+  })
+
+  it('支持省略协议并阻止 HTTPS 页面连接明文 WS', () => {
+    expect(resolveLanUrl('192.168.1.8:8790', 'http://192.168.1.8/SuQCanvas/')).toBe(
+      'ws://192.168.1.8:8790/',
+    )
+    expect(() => resolveLanUrl('ws://192.168.1.8:8790', 'https://canvas.example.com/')).toThrow(
+      '当前页面使用 HTTPS',
+    )
   })
 })
 

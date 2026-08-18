@@ -44,7 +44,9 @@ function broadcastUsers() {
 }
 
 wss.on('connection', (ws, req) => {
-  const ip = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '')
+  const forwarded = req.headers['x-forwarded-for']
+  const forwardedIp = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0]
+  const ip = (forwardedIp?.trim() || req.socket.remoteAddress || '').replace(/^::ffff:/, '')
   const id = crypto.randomUUID()
   const info = { id, name: `设备-${id.slice(0, 4)}`, ip }
   clients.set(ws, info)

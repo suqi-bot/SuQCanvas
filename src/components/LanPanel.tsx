@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useLanStore } from '../store/lanStore'
-import { lanConnect, lanDisconnect } from '../sync/lanClient'
+import { getDefaultLanUrl, lanConnect, lanDisconnect } from '../sync/lanClient'
 import { LanIcon } from '../canvas/nodes/Icons'
 
 const inputCls =
@@ -21,7 +21,7 @@ export function LanPanel() {
   const followId = useLanStore((s) => s.followId)
   const setFollowId = useLanStore((s) => s.setFollowId)
   const [open, setOpen] = useState(false)
-  const [urlDraft, setUrlDraft] = useState('ws://192.168.1.100:8790')
+  const [urlDraft, setUrlDraft] = useState(getDefaultLanUrl)
   const [nameDraft, setNameDraft] = useState('')
 
   const connected = status === 'connected'
@@ -76,7 +76,7 @@ export function LanPanel() {
             <input
               value={urlDraft}
               onChange={(e) => setUrlDraft(e.target.value)}
-              placeholder="ws://192.168.1.100:8790"
+              placeholder="ws://服务器IP:8790 或 wss://域名/lan-ws"
               className={inputCls}
               disabled={connected}
             />
@@ -131,8 +131,8 @@ export function LanPanel() {
           </div>
 
           <p className="mt-3 border-t border-edge pt-2.5 text-[11px] leading-relaxed text-dim">
-            在其他机器执行 <code className="rounded bg-hover px-1">npm run lan</code> 启动中继服务器，输入它的
-            <code className="rounded bg-hover px-1">ws://IP:8790</code> 即可。
+            宝塔部署默认使用同域名 <code className="rounded bg-hover px-1">/lan-ws</code> 反代；局域网直连可输入
+            <code className="rounded bg-hover px-1">ws://IP:8790</code>。
             <br />
             素材与画布操作将实时同步到所有连接设备。
           </p>

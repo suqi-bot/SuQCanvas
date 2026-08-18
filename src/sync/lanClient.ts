@@ -10,6 +10,50 @@ import type { Viewport } from '@xyflow/react'
 const CHUNK_SIZE = 262143 // 256KB - 1（262143 % 3 === 0）
 const LAN_STORAGE_KEY = 'sq:lan'
 
+/**
+ * 将用户输入解析为 WebSocket 地址。支持域名/IP、http(s) 地址及同源相对路径。
+ * HTTPS 页面只能使用 WSS，否则浏览器会按混合内容直接拦截。
+ */
+export function resolveLanUrl(
+  input: string,
+  pageHref = typeof window !== 'undefined' ? window.location.href : undefined,
+): string {
+  const value = input.trim()
+  if (!value) throw new Error('请输入局域网中继地址')
+
+  const pageUrl = pageHref ? new URL(pageHref) : null
+  let candidate = value
+  if (value.startsWith('/')) {
+    if (!pageUrl) throw new Error('相对地址需要在浏览器中使用')
+    candidate = `${pageUrl.protocol === 'https:' ? 'wss:' : 'ws:'}//${pageUrl.host}${value}`
+  } else if (!/^[a-z][a-z\d+.-]*:\/\//i.test(value)) {
+    candidate = `${pageUrl?.protocol === 'https:' ? 'wss' : 'ws'}://${value}`
+  }
+
+  const url = new URL(candidate)
+  if (url.protocol === 'http:') url.protocol = 'ws:'
+  if (url.protocol === 'https:') url.protocol = 'wss:'
+  if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
+    throw new Error('中继地址必须使用 ws:// 或 wss://')
+  }
+  if (pageUrl?.protocol === 'https:' && url.protocol === 'ws:') {
+    throw new Error('当前页面使用 HTTPS，请通过宝塔反向代理连接 wss:// 地址')
+  }
+  return url.toString()
+}
+
+/** 生产环境默认走同域名反代；可在构建时用 VITE_LAN_WS_URL 覆盖。 */
+export function getDefaultLanUrl(): string {
+  const configured = import.meta.env.VITE_LAN_WS_URL?.trim()
+  if (configured) return configured
+  if (typeof window === 'undefined') return 'ws://192.168.1.100:8790'
+  if (window.location.protocol === 'http:') {
+    // 宝塔用 IP/HTTP 直接部署时通常没有 Nginx WebSocket 反代，直接连接中继端口。
+    return `ws://${window.location.hostname}:8790`
+  }
+  return `wss://${window.location.host}/lan-ws`
+}
+
 interface LanMessage {
   t: string
   from?: string
@@ -42,7 +86,7 @@ function send(obj: Record<string, unknown>): void {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj))
 }
 
-export function lanConnect(url: string, name: string): void {
+export function lanConnect(url: string, name: string): boolean {
   if (ws) {
     ws.onclose = null
     ws.onerror = null
@@ -50,26 +94,38 @@ export function lanConnect(url: string, name: string): void {
     ws = null
   }
   const store = useLanStore.getState()
+
+  let resolvedUrl: string
+  try {
+    resolvedUrl = resolveLanUrl(url)
+  } catch (error) {
+    store.setStatus('error')
+    toast(error instanceof Error ? error.message : '局域网连接地址无效', 'error')
+    return false
+  }
+
   store.setStatus('connecting')
-  store.setUrl(url)
+  store.setUrl(resolvedUrl)
   store.setName(name)
   try {
-    localStorage.setItem(LAN_STORAGE_KEY, JSON.stringify({ url, name }))
+    localStorage.setItem(LAN_STORAGE_KEY, JSON.stringify({ url: resolvedUrl, name }))
   } catch {
     // 忽略存储失败
   }
 
   let sock: WebSocket
   try {
-    sock = new WebSocket(url)
+    sock = new WebSocket(resolvedUrl)
   } catch {
     store.setStatus('error')
     toast('局域网连接地址无效', 'error')
-    return
+    return false
   }
   ws = sock
+  let opened = false
 
   sock.onopen = () => {
+    opened = true
     useLanStore.setState({ status: 'connected', followId: null, remoteViewport: null })
     send({ t: 'hello', name })
     toast('已连接局域网协作', 'success')
@@ -81,14 +137,23 @@ export function lanConnect(url: string, name: string): void {
   }
 
   sock.onclose = () => {
-    if (ws === sock) ws = null
-    useLanStore.setState({ status: 'idle', users: [], followId: null, remoteViewport: null })
+    if (ws !== sock) return
+    ws = null
+    useLanStore.setState({
+      status: opened ? 'idle' : 'error',
+      users: [],
+      followId: null,
+      remoteViewport: null,
+    })
     useLanStore.getState().clearRemoteProjects()
-    toast('局域网连接已断开', 'error')
+    if (opened) toast('局域网连接已断开', 'error')
   }
 
   sock.onerror = () => {
-    if (ws === sock) useLanStore.setState({ status: 'error' })
+    if (ws === sock) {
+      useLanStore.setState({ status: 'error' })
+      if (!opened) toast('无法连接局域网中继，请检查地址和反向代理配置', 'error')
+    }
   }
 
   sock.onmessage = (ev) => {
@@ -100,16 +165,24 @@ export function lanConnect(url: string, name: string): void {
     }
     handleMessage(msg)
   }
+  return true
 }
 
 export function lanDisconnect(): void {
-  if (!ws) return
   try {
     localStorage.removeItem(LAN_STORAGE_KEY)
   } catch {
     // 忽略
   }
-  ws.close()
+  const sock = ws
+  ws = null
+  if (sock) {
+    sock.onclose = null
+    sock.onerror = null
+    sock.close()
+  }
+  useLanStore.setState({ status: 'idle', users: [], followId: null, remoteViewport: null })
+  useLanStore.getState().clearRemoteProjects()
 }
 
 /** 刷新页面后根据上次保存的地址自动重连 */

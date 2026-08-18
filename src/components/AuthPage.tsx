@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { isCloudConfigured } from '../sync/supabaseClient'
-import { lanConnect } from '../sync/lanClient'
+import { getDefaultLanUrl, lanConnect } from '../sync/lanClient'
 
 const inputCls =
   'w-full rounded-lg border border-edge2 bg-panel2 px-3 py-2 text-sm text-main outline-none placeholder:text-dim focus:border-sky-500'
@@ -14,7 +14,7 @@ export function AuthPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [lanUrl, setLanUrl] = useState('ws://192.168.1.100:8790')
+  const [lanUrl, setLanUrl] = useState(getDefaultLanUrl)
   const [lanName, setLanName] = useState('')
 
   const switchMode = (m: 'login' | 'register') => {
@@ -25,7 +25,8 @@ export function AuthPage() {
   const handleEnterLan = () => {
     const url = lanUrl.trim()
     if (url) {
-      lanConnect(url, lanName.trim() || `设备-${Math.random().toString(36).slice(2, 6)}`)
+      const started = lanConnect(url, lanName.trim() || `设备-${Math.random().toString(36).slice(2, 6)}`)
+      if (!started) return
     }
     enterGuest()
   }
@@ -109,7 +110,7 @@ export function AuthPage() {
                 <input
                   value={lanUrl}
                   onChange={(e) => setLanUrl(e.target.value)}
-                  placeholder="ws://192.168.1.100:8790"
+                  placeholder="ws://服务器IP:8790 或 wss://域名/lan-ws"
                   className={inputCls}
                 />
                 <input

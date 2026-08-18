@@ -36,6 +36,37 @@ npm run lint     # oxlint
 npm test         # vitest（导入导出往返一致性测试）
 ```
 
+## 宝塔部署局域网协作
+
+只上传 `dist` 静态文件不包含局域网中继服务。服务器还需要保留 `server/`、`package.json` 和
+`package-lock.json`，安装依赖并单独启动中继：
+
+```bash
+npm ci --omit=dev
+npm run lan
+# 或用 PM2 守护：pm2 start server/lan-server.mjs --name suqcanvas-lan
+```
+
+网页使用 HTTPS 时，浏览器会禁止连接 `ws://`。生产环境应让中继运行在服务器的 `8790` 端口，
+不直接暴露公网，再由站点域名反向代理为 `wss://`。
+
+在宝塔站点的 Nginx 配置中加入（放在对应的 `server {}` 内）：
+
+```nginx
+location /lan-ws {
+    proxy_pass http://127.0.0.1:8790;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+```
+
+重载 Nginx 后，应用会默认连接 `wss://当前域名/lan-ws`，无需开放公网 `8790` 端口。若构建时需要使用其他地址，可设置 `VITE_LAN_WS_URL` 后重新执行 `npm run build`。
+
 ## 技术栈
 
 | 层 | 技术 |

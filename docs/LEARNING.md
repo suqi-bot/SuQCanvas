@@ -319,12 +319,19 @@ npm run lan
 # 默认监听 0.0.0.0:8790，可用 PORT=9000 npm run lan 换端口
 ```
 
+注意：只部署前端 `dist` 目录不会启动中继。宝塔服务器还需上传 `server/`、`package.json`、
+`package-lock.json`，执行 `npm ci --omit=dev` 后用 PM2 等进程管理器持续运行中继。
+
 输出 `本机局域网 IP`（Windows: `ipconfig`，Linux/Mac: `ifconfig`）。
 
 ### 2. 各设备连接
 
 应用工具栏右侧「局域网」按钮 → 输入 `ws://<中继机IP>:8790` → 连接。
 昵称可留空自动生成。连接后自动完成初始同步。
+
+如果应用部署在 HTTPS 站点，不能从浏览器连接明文 `ws://`。请在站点 Nginx 中把同域名的
+`/lan-ws` 反向代理到 `http://127.0.0.1:8790`，并启用 WebSocket 的 `Upgrade` / `Connection`
+请求头；客户端会自动使用 `wss://<当前域名>/lan-ws`。完整宝塔配置见项目 `README.md`。
 
 ### 3. 功能
 
