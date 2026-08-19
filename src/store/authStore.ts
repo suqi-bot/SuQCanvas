@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import type { AuthError, User } from '@supabase/supabase-js'
 import { supabase } from '../sync/supabaseClient'
-import { db } from '../db/db'
 import { IS_LAN_BUILD } from '../buildMode'
 import { useProjectStore } from './projectStore'
 import { useCanvasStore } from './canvasStore'
@@ -29,6 +28,19 @@ let listenerInstalled = false
 
 const GUEST_KEY = 'sq:guest'
 
+/** 重置项目/画布状态，使下次进入时按当前登录态重新初始化（防止云端/本地数据串写） */
+function resetProjectState(): void {
+  useProjectStore.setState({
+    projectId: null,
+    projectName: '未命名项目',
+    loaded: false,
+    initialized: false,
+    saveStatus: 'idle',
+  })
+  useCanvasStore.getState().reset()
+  useCanvasStore.getState().clearHistory()
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   guest: false,
@@ -55,7 +67,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!listenerInstalled) {
       listenerInstalled = true
       supabase.auth.onAuthStateChange((_event, session) => {
-        set({ user: session?.user ?? null, loading: false })
+        const wasGuest = get().guest
+        set({
+          user: session?.user ?? null,
+          guest: session?.user ? false : get().guest,
+          loading: false,
+        })
+        if (session?.user && wasGuest) resetProjectState()
       })
     }
     const { data } = await supabase.auth.getSession()
@@ -70,29 +88,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
-    const wasGuest = get().guest
     if (supabase) await supabase.auth.signOut()
-    // 只有退出真实云账号时才清理本地缓存（避免不同账号间数据串入云端）；
-    // 退出局域网/游客模式时保留本地项目，防止数据丢失
-    if (!wasGuest) {
-      await db.projects.clear()
-      await db.assets.clear()
-    }
-    useProjectStore.setState({
-      projectId: null,
-      projectName: '未命名项目',
-      loaded: false,
-      initialized: false,
-      saveStatus: 'idle',
-    })
-    useCanvasStore.getState().reset()
-    useCanvasStore.getState().clearHistory()
+    // 本地数据与云端相互独立：云端用户不写本地项目，游客/本地数据永不因登录或退出而改动
+    resetProjectState()
     localStorage.removeItem(GUEST_KEY)
     set({ user: null, guest: false })
   },
 
   enterGuest: () => {
     localStorage.setItem(GUEST_KEY, '1')
+    resetProjectState()
     set({ guest: true, loading: false })
   },
 }))

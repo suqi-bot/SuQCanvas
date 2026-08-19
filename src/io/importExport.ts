@@ -4,7 +4,10 @@ import { genUuid } from '../utils/uuid'
 import { db } from '../db/db'
 import { useCanvasStore } from '../store/canvasStore'
 import { useProjectStore } from '../store/projectStore'
+import { useAuthStore } from '../store/authStore'
 import { toast } from '../store/uiStore'
+import { upsertAssetMetaToCloud, upsertProjectToCloud } from '../sync/cloudSync'
+import { uploadAssetToOss, uploadThumbToOss } from '../sync/ossClient'
 import type { MediaKind, SuqEdge, SuqNode } from '../types'
 
 const FORMAT = 'sqcanvas'
@@ -146,14 +149,52 @@ export async function importProjectFile(file: File): Promise<void> {
   const now = Date.now()
   const id = genUuid()
   const projectName = json.project?.name || '导入的项目'
-  await db.projects.add({
+  const record = {
     id,
     name: projectName,
     createdAt: now,
     updatedAt: now,
     graph: { nodes: json.nodes ?? [], edges: json.edges ?? [] },
     viewport: json.viewport ?? { x: 0, y: 0, zoom: 1 },
-  })
+  }
+
+  const authed = useAuthStore.getState().user !== null
+  if (authed) {
+    await upsertProjectToCloud(record)
+    for (const asset of json.assets ?? []) {
+      const data = unzipped[`assets/${asset.id}.bin`]
+      if (!data) continue
+      const thumbData = unzipped[`assets/${asset.id}.thumb`]
+      const blob = new Blob([toArrayBuffer(data)], { type: asset.mime || 'application/octet-stream' })
+      const ossKey = await uploadAssetToOss(asset.id, blob)
+      if (!ossKey) continue
+      let ossThumbKey: string | undefined
+      if (thumbData) {
+        try {
+          ossThumbKey = await uploadThumbToOss(
+            asset.id,
+            new Blob([toArrayBuffer(thumbData)], { type: 'image/jpeg' }),
+          )
+        } catch {
+          // 缩略图上传失败不影响主文件
+        }
+      }
+      await upsertAssetMetaToCloud(
+        {
+          id: asset.id,
+          name: asset.name,
+          mime: asset.mime,
+          size: asset.size,
+          kind: asset.kind,
+          hasThumbnail: !!thumbData,
+        },
+        ossKey,
+        ossThumbKey,
+      )
+    }
+  } else {
+    await db.projects.add(record)
+  }
   await useProjectStore.getState().loadProject(id)
   await useProjectStore.getState().saveNow()
   toast('项目导入成功', 'success')

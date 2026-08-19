@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { db } from '../db/db'
 import { useCanvasStore } from './canvasStore'
+import { useAuthStore } from './authStore'
 import { toast } from './uiStore'
 import { genUuid } from '../utils/uuid'
 import {
@@ -33,6 +34,11 @@ interface ProjectState {
 }
 
 const AUTOSAVE_DELAY = 500
+
+/** 已登录云端账号时项目数据仅存云端；游客/未登录仅存本地。 */
+function isCloudUser(): boolean {
+  return useAuthStore.getState().user !== null
+}
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let autosaveInstalled = false
@@ -156,8 +162,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         graph: { nodes: [], edges: [] },
         viewport: { x: 0, y: 0, zoom: 1 },
       }
-      await db.projects.add(record)
-      await upsertProjectToCloud(record)
+      if (isCloudUser()) {
+        await upsertProjectToCloud(record)
+      } else {
+        await db.projects.add(record)
+      }
       set({
         projectId: id,
         projectName: name,
@@ -173,11 +182,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   renameProject: async (id, name) => {
-    await db.projects.update(id, { name })
-    await updateProjectNameInCloud(id, name)
+    if (isCloudUser()) {
+      await updateProjectNameInCloud(id, name)
+    } else {
+      await db.projects.update(id, { name })
+      const record = await db.projects.get(id)
+      if (record) saveProjectToLan(record)
+    }
     if (get().projectId === id) set({ projectName: name })
-    const record = await db.projects.get(id)
-    if (record) saveProjectToLan(record)
     void broadcastLocalProjects()
   },
 
@@ -195,13 +207,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     set({ saveStatus: 'saving' })
     try {
-      await db.projects.update(projectId, {
-        name: record.name,
-        graph: record.graph,
-        viewport,
-        updatedAt: record.updatedAt,
-      })
-      await upsertProjectToCloud(record)
+      if (isCloudUser()) {
+        await upsertProjectToCloud(record)
+      } else {
+        await db.projects.update(projectId, {
+          name: record.name,
+          graph: record.graph,
+          viewport,
+          updatedAt: record.updatedAt,
+        })
+      }
       saveProjectToLan(record)
       set({ saveStatus: 'saved' })
       void broadcastLocalProjects()

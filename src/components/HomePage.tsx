@@ -509,10 +509,14 @@ export function HomePage() {
     if (!window.confirm(`确定删除项目「${p.name}」吗？其中的媒体文件也会被清理。`)) return
     setBusy(true)
     try {
-      await db.projects.delete(p.id)
-      await deleteProjectFromCloud(p.id)
+      const authed = useAuthStore.getState().user !== null
+      if (authed) {
+        await deleteProjectFromCloud(p.id)
+      } else {
+        await db.projects.delete(p.id)
+      }
       if (isSharedId(p.id)) deleteProjectFromLan(p.id)
-      await gcAssets()
+      if (!authed) await gcAssets()
       if (currentId === p.id) {
         const remaining = (await syncProjectList())[0]
         if (remaining) {
@@ -615,6 +619,13 @@ export function HomePage() {
               title={user.email ?? ''}
             >
               {user.email}
+            </span>
+          ) : IS_ONLINE_BUILD ? (
+            <span
+              className="max-w-40 truncate rounded bg-violet-500/15 px-2 py-1 text-xs text-violet-400"
+              title="当前为游客模式，数据仅保存在本设备"
+            >
+              游客模式
             </span>
           ) : (
             <span

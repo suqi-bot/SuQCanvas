@@ -12,7 +12,7 @@ import type {
 } from '../types'
 import { toast } from '../store/uiStore'
 import { isOssConfigured, uploadAssetToOss, uploadThumbToOss } from '../sync/ossClient'
-import { upsertAssetMetaToCloud } from '../sync/cloudSync'
+import { isCloudAuthed, upsertAssetMetaToCloud } from '../sync/cloudSync'
 import { isLanConnected, pushAssetToLan } from '../sync/lanClient'
 import { STICKY_COLORS } from '../types'
 import { generatePsdPreview } from '../media/psdPreview'
@@ -59,6 +59,7 @@ function captureVideoThumbnail(file: File): Promise<Blob> {
 }
 
 async function syncAssetToCloud(meta: AssetMeta, blob: Blob, thumbnail?: Blob): Promise<void> {
+  if (!isCloudAuthed()) return
   if (!isOssConfigured()) return
   const ossKey = await uploadAssetToOss(meta.id, blob)
   if (!ossKey) return

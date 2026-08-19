@@ -21,7 +21,8 @@ async function currentUserId(): Promise<string | null> {
   return data.user?.id ?? null
 }
 
-async function isAuthed(): Promise<boolean> {
+/** 当前是否已登录云端账号（游客/未登录时不执行任何云同步） */
+export async function isCloudAuthed(): Promise<boolean> {
   return (await currentUserId()) !== null
 }
 
@@ -57,7 +58,7 @@ export async function deleteAssetFromCloud(id: string): Promise<void> {
 
 /** 按 id 列表查询云端素材 */
 export async function fetchCloudAssets(ids: string[]): Promise<CloudAsset[]> {
-  if (!supabase || ids.length === 0 || !(await isAuthed())) return []
+  if (!supabase || ids.length === 0 || !(await isCloudAuthed())) return []
   const { data, error } = await supabase.from('assets').select('*').in('id', ids)
   if (error) {
     console.warn('拉取云端素材失败:', error.message)
@@ -97,13 +98,8 @@ function fromCloud(c: CloudProject): ProjectRecord {
   }
 }
 
-function ts(p: { updatedAt?: number; updated_at?: string }): number {
-  if (typeof p.updatedAt === 'number') return p.updatedAt
-  return new Date(p.updated_at ?? 0).getTime()
-}
-
 export async function fetchCloudProjects(): Promise<CloudProject[]> {
-  if (!supabase || !(await isAuthed())) return []
+  if (!supabase || !(await isCloudAuthed())) return []
   const { data, error } = await supabase.from('projects').select('*')
   if (error) {
     console.warn('拉取云端项目失败:', error.message)
@@ -113,7 +109,7 @@ export async function fetchCloudProjects(): Promise<CloudProject[]> {
 }
 
 export async function fetchCloudProject(id: string): Promise<CloudProject | null> {
-  if (!supabase || !(await isAuthed())) return null
+  if (!supabase || !(await isCloudAuthed())) return null
   const { data, error } = await supabase.from('projects').select('*').eq('id', id).maybeSingle()
   if (error) {
     console.warn('拉取云端项目失败:', error.message)
@@ -135,68 +131,34 @@ export async function upsertProjectToCloud(p: ProjectRecord): Promise<boolean> {
 }
 
 export async function updateProjectNameInCloud(id: string, name: string): Promise<void> {
-  if (!supabase) return
+  if (!supabase || !(await isCloudAuthed())) return
   const { error } = await supabase.from('projects').update({ name }).eq('id', id)
   if (error) console.warn('云端重命名失败:', error.message)
 }
 
 export async function deleteProjectFromCloud(id: string): Promise<void> {
-  if (!supabase) return
+  if (!supabase || !(await isCloudAuthed())) return
   const { error } = await supabase.from('projects').delete().eq('id', id)
   if (error) console.warn('云端删除失败:', error.message)
 }
 
 /**
- * 合并本地与云端项目列表（云为主）：
- * 1. 本地有、云端无 → 上传迁移到云端
- * 2. 云端有、本地无 → 下载缓存到本地
- * 3. 两边都有 → 取 updated_at 较新的一方，回写较旧的一方
+ * 项目列表：登录后仅来自云端，游客/未登录仅来自本地，两者互不串通。
  */
 export async function syncProjectList(): Promise<ProjectRecord[]> {
-  const local = await db.projects.toArray()
-  const cloud = await fetchCloudProjects()
-  if (cloud.length === 0 && local.length > 0 && supabase) {
-    for (const p of local) {
-      await upsertProjectToCloud(p)
-    }
+  if (!(await isCloudAuthed())) {
+    const local = await db.projects.toArray()
     return [...local].sort((a, b) => b.updatedAt - a.updatedAt)
   }
-
-  const merged = new Map<string, ProjectRecord>()
-  for (const c of cloud) {
-    merged.set(c.id, fromCloud(c))
-  }
-  for (const l of local) {
-    const existing = merged.get(l.id)
-    if (!existing) {
-      await upsertProjectToCloud(l)
-      merged.set(l.id, l)
-    } else if (l.updatedAt > existing.updatedAt) {
-      await upsertProjectToCloud(l)
-      merged.set(l.id, l)
-    } else if (existing.updatedAt > l.updatedAt) {
-      await db.projects.put(existing)
-      merged.set(l.id, existing)
-    }
-  }
-
-  return [...merged.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+  const cloud = await fetchCloudProjects()
+  return cloud.map(fromCloud).sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
-/** 加载项目：取本地与云端较新的版本 */
+/** 加载项目：登录后仅从云端读取，游客/未登录仅从本地读取。 */
 export async function loadProjectBest(id: string): Promise<ProjectRecord | null> {
-  const local = await db.projects.get(id)
+  if (!(await isCloudAuthed())) {
+    return (await db.projects.get(id)) ?? null
+  }
   const cloud = await fetchCloudProject(id)
-  if (!cloud) return local ?? null
-  if (!local) {
-    const rec = fromCloud(cloud)
-    await db.projects.put(rec)
-    return rec
-  }
-  if (ts(cloud) > local.updatedAt) {
-    const rec = fromCloud(cloud)
-    await db.projects.put(rec)
-    return rec
-  }
-  return local
+  return cloud ? fromCloud(cloud) : null
 }

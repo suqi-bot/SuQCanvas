@@ -206,6 +206,21 @@ export function AuthPage() {
             </div>
           </div>
         )}
+        <div className="my-4 flex items-center gap-3 text-[11px] text-dim">
+          <span className="h-px flex-1 bg-edge2" />
+          或
+          <span className="h-px flex-1 bg-edge2" />
+        </div>
+        <button
+          type="button"
+          onClick={enterGuest}
+          className="w-full rounded-lg border border-edge2 bg-panel px-3 py-2.5 text-sm text-soft transition-colors hover:border-sky-500/50 hover:bg-hover/40 hover:text-main"
+        >
+          游客模式（免登录）
+        </button>
+        <p className="mt-2 text-center text-[11px] leading-relaxed text-dim">
+          无需账号即可使用，项目数据仅保存在本设备
+        </p>
       </div>
     </div>
   )
