@@ -20,6 +20,14 @@ interface UiState {
   pdfViewer: { assetId: string; name: string } | null
   openPdfViewer: (assetId: string, name: string) => void
   closePdfViewer: () => void
+  imageViewer: { assetId: string; name: string; thumbnail?: boolean } | null
+  openImageViewer: (assetId: string, name: string, thumbnail?: boolean) => void
+  closeImageViewer: () => void
+  markdownViewer: { assetId: string; name: string; nodeId?: string } | null
+  openMarkdownViewer: (assetId: string, name: string, nodeId?: string) => void
+  closeMarkdownViewer: () => void
+  fileManagerOpen: boolean
+  setFileManagerOpen: (open: boolean) => void
   homeOpen: boolean
   setHomeOpen: (open: boolean) => void
   tool: ToolMode
@@ -54,6 +62,24 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   closePdfViewer: () => {
     set({ pdfViewer: null })
+  },
+  imageViewer: null,
+  openImageViewer: (assetId, name, thumbnail) => {
+    set({ imageViewer: { assetId, name, thumbnail } })
+  },
+  closeImageViewer: () => {
+    set({ imageViewer: null })
+  },
+  markdownViewer: null,
+  openMarkdownViewer: (assetId, name, nodeId) => {
+    set({ markdownViewer: { assetId, name, nodeId } })
+  },
+  closeMarkdownViewer: () => {
+    set({ markdownViewer: null })
+  },
+  fileManagerOpen: false,
+  setFileManagerOpen: (fileManagerOpen) => {
+    set({ fileManagerOpen })
   },
   homeOpen: false,
   setHomeOpen: (open) => {

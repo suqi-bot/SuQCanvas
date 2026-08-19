@@ -6,6 +6,23 @@ import { requestAssetFromLan } from '../sync/lanClient'
 const urlCache = new Map<string, string>()
 const thumbCache = new Map<string, string>()
 
+export function invalidateAssetUrl(assetId: string): void {
+  const url = urlCache.get(assetId)
+  if (url) URL.revokeObjectURL(url)
+  urlCache.delete(assetId)
+}
+
+export function invalidateThumbnailUrl(assetId: string): void {
+  const url = thumbCache.get(assetId)
+  if (url) URL.revokeObjectURL(url)
+  thumbCache.delete(assetId)
+}
+
+export function invalidateAllAssetUrls(assetId: string): void {
+  invalidateAssetUrl(assetId)
+  invalidateThumbnailUrl(assetId)
+}
+
 async function fetchBlobFromCloud(assetId: string): Promise<void> {
   if (!isOssConfigured()) return
   const blob = await downloadAssetFromOss(assetId)

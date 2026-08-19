@@ -15,6 +15,7 @@ import { isOssConfigured, uploadAssetToOss, uploadThumbToOss } from '../sync/oss
 import { upsertAssetMetaToCloud } from '../sync/cloudSync'
 import { isLanConnected, pushAssetToLan } from '../sync/lanClient'
 import { STICKY_COLORS } from '../types'
+import { generatePsdPreview } from '../media/psdPreview'
 
 function captureVideoThumbnail(file: File): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -78,6 +79,12 @@ export async function putAsset(file: File): Promise<AssetMeta> {
   let thumbnail: Blob | undefined
   if (kind === 'video') {
     thumbnail = await captureVideoThumbnail(file).catch(() => undefined)
+  } else if (kind === 'psd') {
+    thumbnail = await generatePsdPreview(file).catch((error) => {
+      console.warn('PSD 预览生成失败:', file.name, error)
+      toast(`「${file.name}」无法生成预览，仍可下载原文件`, 'error')
+      return undefined
+    })
   }
   await db.assets.add({
     id,
@@ -108,11 +115,30 @@ export async function putAsset(file: File): Promise<AssetMeta> {
   return meta
 }
 
+/** 更新可编辑文本资源，并复用现有云端/局域网素材同步链路。 */
+export async function updateAssetText(assetId: string, text: string): Promise<void> {
+  const record = await db.assets.get(assetId)
+  if (!record) throw new Error('素材不存在')
+  const blob = new Blob([text], { type: record.mime || 'text/markdown' })
+  await db.assets.put({ ...record, blob, size: blob.size })
+  const meta: AssetMeta = {
+    id: record.id,
+    name: record.name,
+    mime: record.mime,
+    size: blob.size,
+    kind: record.kind,
+    hasThumbnail: Boolean(record.thumbnail),
+  }
+  if (isLanConnected()) void pushAssetToLan(meta, blob)
+  void syncAssetToCloud(meta, blob, record.thumbnail)
+}
+
 const KIND_TO_TYPE: Record<MediaKind, string> = {
   image: 'image',
   video: 'video',
   audio: 'audio',
   pdf: 'pdf',
+  psd: 'psd',
   markdown: 'markdown',
   text: 'text',
   file: 'fileCard',
@@ -126,6 +152,7 @@ const PLACEHOLDER_SIZE: Record<MediaKind, { width?: number; height?: number }> =
   video: { width: 480, height: 270 },
   audio: { width: 260 },
   pdf: { width: 300, height: 400 },
+  psd: { width: 320, height: 240 },
   markdown: { width: 340 },
   text: { width: 280 },
   file: { width: 240 },

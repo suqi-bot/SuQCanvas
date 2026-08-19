@@ -5,6 +5,7 @@ import { HeadingNode } from './HeadingNode'
 import { ImageNode } from './ImageNode'
 import { MarkdownNode } from './MarkdownNode'
 import { PdfNode } from './PdfNode'
+import { PsdNode } from './PsdNode'
 import { ShapeNode } from './ShapeNode'
 import { StickyNode } from './StickyNode'
 import { TextNode } from './TextNode'
@@ -18,6 +19,7 @@ export const mediaNodeTypes: NodeTypes = {
   text: TextNode,
   markdown: MarkdownNode,
   pdf: PdfNode,
+  psd: PsdNode,
   heading: HeadingNode,
   sticky: StickyNode,
   shape: ShapeNode,

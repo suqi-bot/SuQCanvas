@@ -11,6 +11,7 @@ import { useCanvasStore } from '../../store/canvasStore'
 import { useUiStore } from '../../store/uiStore'
 import type { SuqNode } from '../../types'
 import { CopyIcon, KindIcon, TrashIcon } from './Icons'
+import { useLanStore } from '../../store/lanStore'
 
 const HANDLE_SIDES = [
   { id: 'top', position: Position.Top },
@@ -36,6 +37,9 @@ export const MediaNodeShell = memo(function MediaNodeShell({
   const updateNodeInternals = useUpdateNodeInternals()
   const duplicateNode = useCanvasStore((s) => s.duplicateNode)
   const tool = useUiStore((s) => s.tool)
+  const lock = useLanStore((s) =>
+    Object.values(s.editing).find((item) => item.nodeId === id && item.userId !== s.selfId),
+  )
 
   // 模式切换时让 ReactFlow 重新测量手柄边界，保证连线模式下的边条带热区生效
   useEffect(() => {
@@ -50,6 +54,12 @@ export const MediaNodeShell = memo(function MediaNodeShell({
       style={{ borderColor: data.borderColor ?? '#64748b' }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onPointerDownCapture={(event) => {
+        if (!lock) return
+        event.preventDefault()
+        event.stopPropagation()
+      }}
+      aria-disabled={Boolean(lock)}
     >
       {HANDLE_SIDES.map(({ id: hid, position }) => (
         <span key={hid}>
@@ -102,6 +112,23 @@ export const MediaNodeShell = memo(function MediaNodeShell({
           </span>
           <span className="truncate text-xs text-soft" title={data.label}>
             {data.label ?? ''}
+          </span>
+        </div>
+      )}
+
+      {data.createdByName && (hovered || selected) && (
+        <span
+          className="pointer-events-none absolute bottom-1.5 right-1.5 max-w-[70%] truncate rounded bg-panel/90 px-1.5 py-0.5 text-[10px] text-dim shadow"
+          title={`由 ${data.createdByName} 插入`}
+        >
+          {data.createdByName}
+        </span>
+      )}
+
+      {lock && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-slate-950/10">
+          <span className="rounded bg-panel/90 px-2 py-1 text-xs text-soft shadow">
+            {lock.name} 正在操作此元素
           </span>
         </div>
       )}

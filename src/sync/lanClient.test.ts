@@ -24,6 +24,24 @@ const PORT = 9890
 const CHUNK = 262143
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+async function connectWhenReady(url: string, timeoutMs = 5000): Promise<WebSocket> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const socket = new WebSocket(url)
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', resolve)
+        socket.once('error', reject)
+      })
+      return socket
+    } catch {
+      socket.close()
+      await sleep(100)
+    }
+  }
+  throw new Error(`LAN test server did not become ready within ${timeoutMs}ms`)
+}
+
 let server: ChildProcess
 let A: WebSocket
 let dataDir: string
@@ -35,12 +53,7 @@ beforeAll(async () => {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   server.stderr?.on('data', (d) => process.stderr.write(`[server] ${d}`))
-  await sleep(400)
-  A = new WebSocket(`ws://127.0.0.1:${PORT}/lan-ws`)
-  await new Promise<void>((res, rej) => {
-    A.on('open', () => res())
-    A.on('error', rej)
-  })
+  A = await connectWhenReady(`ws://127.0.0.1:${PORT}/lan-ws`)
   A.send(JSON.stringify({ t: 'hello', name: 'device-A' }))
   A.send(JSON.stringify({ t: 'join-project', projectId: 'test-project' }))
   lanConnect(`ws://127.0.0.1:${PORT}/lan-ws`, 'device-B')

@@ -22,6 +22,7 @@ import {
 import { STICKY_COLORS, type StickyColor, type SuqEdge, type SuqNode } from '../types'
 import type { Theme } from '../store/settingsStore'
 import { LanIcon, MoonIcon, PlusIcon, SunIcon } from '../canvas/nodes/Icons'
+import { APP_VERSION } from '../appVersion'
 
 function fmtTime(ts: number): string {
   return new Date(ts).toLocaleString('zh-CN', {
@@ -576,7 +577,10 @@ export function HomePage() {
     <div className="fixed inset-0 z-40 overflow-y-auto bg-app text-main">
       <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-8 py-6">
         <header className="flex shrink-0 items-center gap-3">
-          <span className="text-lg font-bold tracking-wide">SuQCanvas</span>
+          <div className="flex shrink-0 items-baseline gap-2">
+            <span className="text-lg font-bold tracking-wide">SuQCanvas</span>
+            <span className="text-[11px] font-medium tabular-nums text-dim">{APP_VERSION}</span>
+          </div>
           <span className="text-xs text-dim">无限画布 · 项目总览</span>
           {IS_ONLINE_BUILD ? (
             <>

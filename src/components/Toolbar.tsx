@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useUiStore, type ToolMode } from '../store/uiStore'
 import { useProjectStore, type SaveStatus } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -7,6 +8,7 @@ import { exportCurrentProject } from '../io/importExport'
 import { LanPanel } from './LanPanel'
 import { IS_LAN_BUILD } from '../buildMode'
 import { STICKY_COLORS } from '../types'
+import { CanvasSearch } from './CanvasSearch'
 import {
   AlignBottomIcon,
   AlignCenterHIcon,
@@ -93,10 +95,14 @@ const btnCls =
 export function Toolbar() {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const insertButtonRef = useRef<HTMLButtonElement | null>(null)
+  const portalMenuRef = useRef<HTMLDivElement | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 })
 
   const requestImport = useUiStore((s) => s.requestImport)
   const setHomeOpen = useUiStore((s) => s.setHomeOpen)
+  const setFileManagerOpen = useUiStore((s) => s.setFileManagerOpen)
   const tool = useUiStore((s) => s.tool)
   const setTool = useUiStore((s) => s.setTool)
   const projectName = useProjectStore((s) => s.projectName)
@@ -114,10 +120,32 @@ export function Toolbar() {
   useEffect(() => {
     if (!menuOpen) return
     const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+      const target = e.target as Node
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(target) &&
+        !portalMenuRef.current?.contains(target)
+      ) {
+        setMenuOpen(false)
+      }
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
+  }, [menuOpen])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const updatePosition = () => {
+      const rect = insertButtonRef.current?.getBoundingClientRect()
+      if (rect) setMenuPosition({ left: rect.left, top: rect.bottom + 4 })
+    }
+    updatePosition()
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+    return () => {
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
   }, [menuOpen])
 
   const status = STATUS_LABEL[saveStatus]
@@ -166,10 +194,23 @@ export function Toolbar() {
         导入
       </button>
 
+      <CanvasSearch />
+
+      <button
+        type="button"
+        title="文件管理 (Ctrl+P)"
+        className="flex shrink-0 items-center gap-1.5 rounded-md border border-edge2 px-2.5 py-1.5 text-xs text-soft hover:bg-hover hover:text-main"
+        onClick={() => setFileManagerOpen(true)}
+      >
+        <FileIcon />
+        文件管理
+      </button>
+
       <div className="mx-1 h-5 w-px shrink-0 bg-edge2" />
 
       <div className="relative shrink-0" ref={menuRef}>
         <button
+          ref={insertButtonRef}
           type="button"
           onClick={() => setMenuOpen((v) => !v)}
           title="插入元素"
@@ -182,8 +223,12 @@ export function Toolbar() {
           <PlusIcon />
           插入
         </button>
-        {menuOpen && (
-          <div className="absolute left-0 top-full z-40 mt-1 w-44 rounded-lg border border-edge bg-panel p-1 shadow-2xl">
+        {menuOpen && createPortal(
+          <div
+            ref={portalMenuRef}
+            className="fixed z-[80] w-44 rounded-lg border border-edge bg-panel p-1 shadow-2xl"
+            style={{ left: menuPosition.left, top: menuPosition.top }}
+          >
             {INSERT_ITEMS.map((item) => (
               <div key={`${item.kind}-${item.level ?? item.shape ?? ''}`}>
                 <button
@@ -225,7 +270,8 @@ export function Toolbar() {
                 )}
               </div>
             ))}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
 

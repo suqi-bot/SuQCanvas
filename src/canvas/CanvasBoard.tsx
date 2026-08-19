@@ -10,6 +10,7 @@ import {
   SelectionMode,
   useReactFlow,
   useStoreApi,
+  type OnNodeDrag,
   type NodeTypes,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -26,12 +27,12 @@ import {
   createTextNode,
   importFiles,
 } from '../io/fileLoader'
-import type { HeadingLevel, ShapeType, StickyColor } from '../types'
+import type { HeadingLevel, ShapeType, StickyColor, SuqNode } from '../types'
 import { DEFAULT_EDGE_STYLE } from '../types'
 import { mediaNodeTypes } from './nodes/nodeTypes'
 import { styledEdgeTypes } from './edges/edgeTypes'
 import { InspectorPanel } from '../components/InspectorPanel'
-import { sendLanCursor } from '../sync/lanClient'
+import { isNodeLockedByOther, sendLanCursor, setLanEditing, clearLanEditing } from '../sync/lanClient'
 
 const MIN_ZOOM = 0.05
 const MAX_ZOOM = 8
@@ -43,7 +44,7 @@ function BoardInner() {
   const onEdgesChange = useCanvasStore((s) => s.onEdgesChange)
   const onConnect = useCanvasStore((s) => s.onConnect)
   const setViewport = useCanvasStore((s) => s.setViewport)
-  const { screenToFlowPosition, flowToScreenPosition, setViewport: rfSetViewport, fitView, zoomIn, zoomOut, setCenter } =
+  const { screenToFlowPosition, flowToScreenPosition, setViewport: rfSetViewport, fitView, zoomIn, zoomOut, setCenter, getZoom } =
     useReactFlow()
   const storeApi = useStoreApi()
   const [dragging, setDragging] = useState(false)
@@ -56,6 +57,28 @@ function BoardInner() {
   const isLight = theme === 'light'
   const cursors = useLanStore((s) => s.cursors)
   const selfId = useLanStore((s) => s.selfId)
+  const editing = useLanStore((s) => s.editing)
+  const lockedNodeIds = useMemo(
+    () => new Set(Object.values(editing).filter((item) => item.userId !== selfId).map((item) => item.nodeId)),
+    [editing, selfId],
+  )
+  const handleNodesChange = useCallback(
+    (changes: Parameters<typeof onNodesChange>[0]) => {
+      onNodesChange(changes.filter((change) => !('id' in change) || !lockedNodeIds.has(change.id)))
+    },
+    [lockedNodeIds, onNodesChange],
+  )
+  const lockedNodes = useMemo(
+    () => nodes.map((node) => (lockedNodeIds.has(node.id) ? { ...node, draggable: false, selectable: false } : node)),
+    [nodes, lockedNodeIds],
+  )
+  const onNodeDragStart = useCallback<OnNodeDrag<SuqNode>>((_event, node) => {
+    if (isNodeLockedByOther(node.id)) return
+    setLanEditing(node.id, node.data?.label ?? '元素')
+  }, [])
+  const onNodeDragStop = useCallback<OnNodeDrag<SuqNode>>(() => {
+    clearLanEditing()
+  }, [])
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     const p = screenToFlowPosition({ x: e.clientX, y: e.clientY })
     sendLanCursor(p.x, p.y)
@@ -241,13 +264,36 @@ function BoardInner() {
         setCenter(c.x, c.y, { zoom: 1, duration: 200 })
       }
     }
+    const onFocusNode = (e: Event) => {
+      const nodeId = String((e as CustomEvent).detail?.nodeId ?? '')
+      const store = useCanvasStore.getState()
+      const node = store.nodes.find((item) => item.id === nodeId)
+      if (!node) return
+      if (!isNodeLockedByOther(nodeId)) {
+        store.onNodesChange(
+          store.nodes.map((item) => ({
+            id: item.id,
+            type: 'select' as const,
+            selected: item.id === nodeId,
+          })),
+        )
+      }
+      const width = node.measured?.width ?? node.width ?? 240
+      const height = node.measured?.height ?? node.height ?? 160
+      setCenter(node.position.x + width / 2, node.position.y + height / 2, {
+        zoom: Math.min(1.5, Math.max(0.8, getZoom())),
+        duration: 350,
+      })
+    }
     window.addEventListener('sq:add-node', onAddNode)
     window.addEventListener('sq:view', onView)
+    window.addEventListener('sq:focus-node', onFocusNode)
     return () => {
       window.removeEventListener('sq:add-node', onAddNode)
       window.removeEventListener('sq:view', onView)
+      window.removeEventListener('sq:focus-node', onFocusNode)
     }
-  }, [centerPosition, fitView, zoomIn, zoomOut, screenToFlowPosition, setCenter])
+  }, [centerPosition, fitView, getZoom, zoomIn, zoomOut, screenToFlowPosition, setCenter])
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -280,13 +326,15 @@ function BoardInner() {
 
   return (
     <ReactFlow
-      nodes={nodes}
+      nodes={lockedNodes}
       edges={edges}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
-      onNodesChange={onNodesChange}
+      onNodesChange={handleNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
+      onNodeDragStart={onNodeDragStart}
+      onNodeDragStop={onNodeDragStop}
       isValidConnection={(c) => c.source !== c.target}
       deleteKeyCode={['Backspace', 'Delete']}
       connectionLineType={ConnectionLineType.Bezier}
@@ -300,6 +348,7 @@ function BoardInner() {
       selectionOnDrag={tool === 'select'}
       nodesDraggable={tool === 'select'}
       elementsSelectable={tool !== 'drag'}
+      elevateNodesOnSelect={false}
       nodesConnectable={tool !== 'drag'}
       connectOnClick={tool !== 'drag'}
       connectionRadius={tool === 'connect' ? 300 : 20}

@@ -79,6 +79,23 @@ export function FileIcon(props: IconProps) {
   )
 }
 
+export function SearchIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-4-4" />
+    </Base>
+  )
+}
+
+export function CloseIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M6 6l12 12M18 6 6 18" />
+    </Base>
+  )
+}
+
 export function OpenIcon(props: IconProps) {
   return (
     <Base {...props}>
@@ -436,6 +453,8 @@ export function KindIcon({ kind, ...props }: IconProps & { kind: MediaKind }) {
       return <TextIcon {...props} />
     case 'pdf':
       return <PdfIcon {...props} />
+    case 'psd':
+      return <ImageIcon {...props} />
     case 'heading':
       return <HeadingIcon {...props} />
     case 'sticky':

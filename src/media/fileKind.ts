@@ -2,10 +2,11 @@ import type { MediaKind } from '../types'
 
 export function detectKind(file: File): MediaKind {
   const type = file.type.toLowerCase()
+  const ext = file.name.split('.').pop()?.toLowerCase()
+  if (ext === 'psd') return 'psd'
   if (type.startsWith('image/')) return 'image'
   if (type.startsWith('video/')) return 'video'
   if (type.startsWith('audio/')) return 'audio'
-  const ext = file.name.split('.').pop()?.toLowerCase()
   if (ext === 'pdf') return 'pdf'
   if (ext === 'md' || ext === 'markdown') return 'markdown'
   if (type.startsWith('text/') || ['txt', 'log', 'csv'].includes(ext ?? '')) {

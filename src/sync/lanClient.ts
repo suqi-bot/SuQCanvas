@@ -521,6 +521,13 @@ export function clearLanEditing(): void {
   roomSend('editing', { active: false, name: useLanStore.getState().name, updatedAt: Date.now() })
 }
 
+export function isNodeLockedByOther(nodeId: string): boolean {
+  const selfId = useLanStore.getState().selfId
+  return Object.values(useLanStore.getState().editing).some(
+    (item) => item.nodeId === nodeId && item.userId !== selfId,
+  )
+}
+
 /** 将项目快照保存到运行中继服务的局域网主机。 */
 export function saveProjectToLan(project: ProjectRecord): boolean {
   if (!isLanConnected()) return false

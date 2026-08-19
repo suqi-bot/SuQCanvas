@@ -4,6 +4,9 @@ import { Toolbar } from './components/Toolbar'
 import { Toasts } from './components/Toasts'
 import { HomePage } from './components/HomePage'
 import { PdfViewerModal } from './components/PdfViewerModal'
+import { ImageViewerModal } from './components/ImageViewerModal'
+import { MarkdownViewerModal } from './components/MarkdownViewerModal'
+import { FileManagerModal } from './components/FileManagerModal'
 import { AuthPage } from './components/AuthPage'
 import { useProjectStore } from './store/projectStore'
 import { useUiStore } from './store/uiStore'
@@ -49,6 +52,9 @@ export default function App() {
       </div>
       <HomePage />
       <PdfViewerModal />
+      <ImageViewerModal />
+      <MarkdownViewerModal />
+      <FileManagerModal />
       <Toasts />
       {busy && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--overlay)]">

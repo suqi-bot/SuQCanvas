@@ -2,6 +2,7 @@ import type { Connection, EdgeChange, NodeChange, Viewport } from '@xyflow/react
 import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
 import { create } from 'zustand'
 import { DEFAULT_EDGE_STYLE, type SuqEdge, type SuqNode } from '../types'
+import { useLanStore } from './lanStore'
 
 let idCounter = 0
 export function genId(prefix = 'n'): string {
@@ -18,6 +19,8 @@ export type AlignMode =
   | 'bottom'
   | 'distributeH'
   | 'distributeV'
+
+export type LayerMode = 'front' | 'forward' | 'backward' | 'back'
 
 interface HistoryEntry {
   nodes: SuqNode[]
@@ -41,6 +44,9 @@ interface CanvasState {
   updateNodeData: (id: string, data: Partial<SuqNode['data']>) => void
   updateEdgeData: (id: string, data: Partial<SuqEdge['data']>) => void
   duplicateNode: (id: string) => void
+  changeNodeLayer: (id: string, mode: LayerMode) => void
+  setNodeZIndex: (id: string, zIndex: number) => void
+  removeAssets: (assetIds: string[]) => void
   alignSelected: (mode: AlignMode) => void
   undo: () => void
   redo: () => void
@@ -97,6 +103,15 @@ function flushPending(get: () => CanvasState) {
   }
 }
 
+function insertionMeta() {
+  const lan = useLanStore.getState()
+  return {
+    createdById: lan.selfId || undefined,
+    createdByName: lan.name.trim() || '本机用户',
+    createdAt: Date.now(),
+  }
+}
+
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   nodes: [],
   edges: [],
@@ -139,7 +154,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
   addNodes: (nodes) => {
     snapshotNow(set, get)
-    set({ nodes: [...get().nodes, ...nodes] })
+    const meta = insertionMeta()
+    set({
+      nodes: [
+        ...get().nodes,
+        ...nodes.map((node) => ({
+          ...node,
+          data: node.data.createdByName ? node.data : { ...node.data, ...meta },
+        })),
+      ],
+    })
   },
   addEdge: (edge) => {
     snapshotNow(set, get)
@@ -169,9 +193,53 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       id: genId('n'),
       position: { x: node.position.x + 28, y: node.position.y + 28 },
       selected: false,
+      data: { ...node.data, ...insertionMeta() },
     }
     snapshotNow(set, get)
     set({ nodes: [...get().nodes, clone] })
+  },
+  changeNodeLayer: (id, mode) => {
+    const nodes = get().nodes
+    const ordered = [...nodes].sort(
+      (a, b) => (a.zIndex ?? nodes.indexOf(a)) - (b.zIndex ?? nodes.indexOf(b)),
+    )
+    const index = ordered.findIndex((node) => node.id === id)
+    if (index < 0) return
+    let target = index
+    if (mode === 'front') target = ordered.length - 1
+    else if (mode === 'forward') target = Math.min(ordered.length - 1, index + 1)
+    else if (mode === 'backward') target = Math.max(0, index - 1)
+    else target = 0
+    if (target === index) return
+    const [node] = ordered.splice(index, 1)
+    ordered.splice(target, 0, node)
+    const ranks = new Map(ordered.map((item, rank) => [item.id, rank]))
+    snapshotNow(set, get)
+    set({ nodes: nodes.map((item) => ({ ...item, zIndex: ranks.get(item.id) ?? 0 })) })
+  },
+  setNodeZIndex: (id, value) => {
+    if (!Number.isFinite(value)) return
+    const zIndex = Math.min(9999, Math.max(0, Math.trunc(value)))
+    const nodes = get().nodes
+    const node = nodes.find((item) => item.id === id)
+    if (!node || node.zIndex === zIndex) return
+    snapshotNow(set, get)
+    set({ nodes: nodes.map((item) => (item.id === id ? { ...item, zIndex } : item)) })
+  },
+  removeAssets: (assetIds) => {
+    const ids = new Set(assetIds)
+    if (ids.size === 0) return
+    const removedNodeIds = new Set(
+      get().nodes.filter((node) => node.data.assetId && ids.has(node.data.assetId)).map((node) => node.id),
+    )
+    if (removedNodeIds.size === 0) return
+    snapshotNow(set, get)
+    set({
+      nodes: get().nodes.filter((node) => !removedNodeIds.has(node.id)),
+      edges: get().edges.filter(
+        (edge) => !removedNodeIds.has(edge.source) && !removedNodeIds.has(edge.target),
+      ),
+    })
   },
   alignSelected: (mode) => {
     const nodes = get().nodes

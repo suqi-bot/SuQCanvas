@@ -5,6 +5,7 @@ export type MediaKind =
   | 'video'
   | 'audio'
   | 'pdf'
+  | 'psd'
   | 'markdown'
   | 'text'
   | 'file'
@@ -88,6 +89,10 @@ export interface SuqNodeData extends Record<string, unknown> {
   italic?: boolean
   underline?: boolean
   lineHeight?: number
+  createdById?: string
+  createdByName?: string
+  createdAt?: number
+  assetUpdatedAt?: number
 }
 
 export interface SuqEdgeData extends Record<string, unknown> {

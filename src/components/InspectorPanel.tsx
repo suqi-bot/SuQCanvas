@@ -1,5 +1,6 @@
 import { useReactFlow } from '@xyflow/react'
-import { useCanvasStore } from '../store/canvasStore'
+import { useCanvasStore, type LayerMode } from '../store/canvasStore'
+import { useLanStore } from '../store/lanStore'
 import type {
   ArrowPos,
   EdgeStyle,
@@ -159,12 +160,19 @@ export function InspectorPanel() {
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const updateEdgeData = useCanvasStore((s) => s.updateEdgeData)
   const duplicateNode = useCanvasStore((s) => s.duplicateNode)
+  const changeNodeLayer = useCanvasStore((s) => s.changeNodeLayer)
+  const setNodeZIndex = useCanvasStore((s) => s.setNodeZIndex)
   const { deleteElements } = useReactFlow()
 
   const selectedNodes = nodes.filter((n) => n.selected)
+  const editing = useLanStore((s) => s.editing)
+  const selfId = useLanStore((s) => s.selfId)
+  const selectedEditableNodes = selectedNodes.filter(
+    (node) => !Object.values(editing).some((item) => item.nodeId === node.id && item.userId !== selfId),
+  )
   const selectedEdges = edges.filter((e) => e.selected)
 
-  if (selectedNodes.length === 0 && selectedEdges.length === 0) return null
+  if (selectedEditableNodes.length === 0 && selectedEdges.length === 0) return null
 
   const applyEdgeStyle = (patch: Partial<EdgeStyle>) => {
     for (const e of selectedEdges) {
@@ -179,7 +187,7 @@ export function InspectorPanel() {
   const setStrokeWidth = (strokeWidth: number) => applyEdgeStyle({ strokeWidth })
 
   const firstEdge = selectedEdges[0]
-  const firstNode = selectedNodes[0]
+  const firstNode = selectedEditableNodes[0]
 
   return (
     <aside className="absolute bottom-3 right-3 top-3 z-30 w-64 select-none overflow-y-auto rounded-xl border border-edge bg-panel/95 text-main shadow-2xl">
@@ -250,15 +258,15 @@ export function InspectorPanel() {
         </>
       )}
 
-      {selectedNodes.length > 0 && firstNode && (
+      {selectedEditableNodes.length > 0 && firstNode && (
         <>
           <div className="flex items-center justify-between border-b border-edge px-3 py-2">
             <span className="text-sm font-medium">
-              元素 {selectedNodes.length > 1 ? `(${selectedNodes.length} 个)` : ''}
+              元素 {selectedEditableNodes.length > 1 ? `(${selectedEditableNodes.length} 个)` : ''}
             </span>
             <button
               type="button"
-              onClick={() => deleteElements({ nodes: selectedNodes.map((n) => ({ id: n.id })) })}
+              onClick={() => deleteElements({ nodes: selectedEditableNodes.map((n) => ({ id: n.id })) })}
               className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-rose-500 hover:bg-hover"
             >
               <TrashIcon /> 删除
@@ -277,7 +285,14 @@ export function InspectorPanel() {
               onChange={(c) => updateNodeData(firstNode.id, { borderColor: c })}
             />
           </Section>
-          {selectedNodes.length === 1 &&
+          {selectedEditableNodes.length === 1 && (
+            <Section title="插入者">
+              <div className="truncate text-xs text-soft" title={firstNode.data.createdByName}>
+                {firstNode.data.createdByName ?? '历史元素（未记录）'}
+              </div>
+            </Section>
+          )}
+          {selectedEditableNodes.length === 1 &&
             (firstNode.data.kind === 'text' ||
               firstNode.data.kind === 'heading' ||
               firstNode.data.kind === 'sticky' ||
@@ -411,7 +426,7 @@ export function InspectorPanel() {
               </>
             )}
 
-          {selectedNodes.length === 1 && firstNode.data.kind === 'heading' && (
+          {selectedEditableNodes.length === 1 && firstNode.data.kind === 'heading' && (
             <Section title="标题级别">
               <Segmented<HeadingLevelOrNone>
                 value={(firstNode.data.level ?? 1) as HeadingLevelOrNone}
@@ -431,7 +446,7 @@ export function InspectorPanel() {
             </Section>
           )}
 
-          {selectedNodes.length === 1 && firstNode.data.kind === 'sticky' && (
+          {selectedEditableNodes.length === 1 && firstNode.data.kind === 'sticky' && (
             <Section title="便签颜色">
               <div className="flex flex-wrap gap-1.5">
                 {(Object.keys(STICKY_COLORS) as StickyColor[]).map((key) => (
@@ -457,7 +472,7 @@ export function InspectorPanel() {
             </Section>
           )}
 
-          {selectedNodes.length === 1 && firstNode.data.kind === 'shape' && (
+          {selectedEditableNodes.length === 1 && firstNode.data.kind === 'shape' && (
             <>
               <Section title="形状">
                 <Segmented<ShapeType>
@@ -483,16 +498,51 @@ export function InspectorPanel() {
             </>
           )}
 
-          {selectedNodes.length === 1 && (
-            <Section title="操作">
-              <button
-                type="button"
-                onClick={() => duplicateNode(firstNode.id)}
-                className="flex items-center gap-1.5 rounded-md border border-edge2 px-2.5 py-1.5 text-xs text-soft hover:bg-hover"
-              >
-                <CopyIcon /> 复制元素
-              </button>
-            </Section>
+          {selectedEditableNodes.length === 1 && (
+            <>
+              <Section title="层级">
+                <input
+                  type="number"
+                  min={0}
+                  max={9999}
+                  step={1}
+                  value={firstNode.zIndex ?? nodes.indexOf(firstNode)}
+                  title="层级数值，数值越大越靠上"
+                  aria-label="层级数值"
+                  onChange={(event) => {
+                    if (event.target.value === '') return
+                    setNodeZIndex(firstNode.id, Number(event.target.value))
+                  }}
+                  className="mb-2 w-full rounded-md border border-edge2 bg-panel2 px-2 py-1.5 text-xs tabular-nums text-main outline-none focus:border-sky-500"
+                />
+                <div className="grid grid-cols-2 gap-1.5">
+                  {([
+                    ['front', '置于顶层'],
+                    ['forward', '上移一层'],
+                    ['backward', '下移一层'],
+                    ['back', '置于底层'],
+                  ] as Array<[LayerMode, string]>).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => changeNodeLayer(firstNode.id, mode)}
+                      className="rounded-md border border-edge2 px-2 py-1.5 text-xs text-soft hover:bg-hover"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </Section>
+              <Section title="操作">
+                <button
+                  type="button"
+                  onClick={() => duplicateNode(firstNode.id)}
+                  className="flex items-center gap-1.5 rounded-md border border-edge2 px-2.5 py-1.5 text-xs text-soft hover:bg-hover"
+                >
+                  <CopyIcon /> 复制元素
+                </button>
+              </Section>
+            </>
           )}
         </>
       )}
