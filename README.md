@@ -29,23 +29,62 @@
 
 ```bash
 npm install
-npm run dev      # 开发模式
-npm run build    # 生产构建（tsc + vite）
-npm run preview  # 预览生产构建
+npm run dev      # 开发模式（在线版）
+npm run dev:lan  # 开发模式（局域网版）
 npm run lint     # oxlint
 npm test         # vitest（导入导出往返一致性测试）
 ```
 
+局域网版首次打开会要求填写 `ws://服务器IP:8790`（或反向代理的 `wss://` 地址）和协作名称；该名称会显示给同一项目中的其他成员。连接成功后会记住配置，之后自动重连；主页的“局域网”按钮可断开并返回登录页重新填写。
+
+## 打包（在线版 / 局域网版分开构建）
+
+应用分为两个版本，打包时可任选：
+
+- **在线版**：Supabase 账号登录 + 云同步 + OSS 媒体存储，不含局域网协作入口
+- **局域网版**：无需登录，首次填写中继地址和设备名称后进入画布；项目按房间实时协作，并持久保存到运行中继服务的局域网主机
+
+```bash
+npm run build         # 交互选择：1) 在线版 2) 局域网版 3) 全部
+npm run build:online  # 仅在线版   -> dist/
+npm run build:lan     # 仅局域网版 -> dist-lan/
+npm run package:lan   # 生成本地一键启动包和 ZIP -> release/
+npm run build:all     # 两个都构建
+npm run preview       # 预览 dist/ 生产构建
+```
+
+构建模式由 `.env.online` / `.env.lan` 中的 `VITE_BUILD_TARGET` 控制。
+在线版的真实密钥请写入 `.env.online.local`（已被 git 忽略），不要提交到仓库。
+
+本地包包含 Windows Node 运行时，解压后双击 `start-lan.bat` 即可同时启动网页和协作服务，无需安装依赖。首次启动会请求 Windows
+防火墙权限；同一局域网的其他设备打开窗口中显示的地址即可加入，项目数据保存在包内 `server/data/`。
+
 ## 宝塔部署局域网协作
 
-只上传 `dist` 静态文件不包含局域网中继服务。服务器还需要保留 `server/`、`package.json` 和
-`package-lock.json`，安装依赖并单独启动中继：
+局域网版上传 `dist-lan/` 静态文件即可使用（无需账号）。但仅上传静态文件不包含局域网中继服务，
+服务器还需要保留 `server/`、`package.json` 和 `package-lock.json`，安装依赖并单独启动中继：
 
 ```bash
 npm ci --omit=dev
 npm run lan
 # 或用 PM2 守护：pm2 start server/lan-server.mjs --name suqcanvas-lan
+
+# Windows 首次部署时放行局域网中继端口（会弹出 UAC，仅允许本地子网访问）
+npm run lan:open
 ```
+
+局域网共享项目和素材默认保存在开启中继服务的设备：
+
+```text
+server/data/projects.json  # 共享项目数据
+server/data/assets/        # 项目素材
+```
+
+这就是局域网项目的主副本，建议定期备份整个 `server/data/`。如需放到独立数据盘，可在启动前设置
+`LAN_DATA_DIR`（例如 Windows PowerShell：`$env:LAN_DATA_DIR='D:\SuQCanvasData'; npm run lan`）。
+参与协作的浏览器仍会保留 IndexedDB 本地缓存，但主机离线时无法继续访问共享项目。
+
+同一中继支持多个项目：设备打开项目后只加入该项目房间，不同项目的画布操作、视口和素材不会串流。
 
 网页使用 HTTPS 时，浏览器会禁止连接 `ws://`。生产环境应让中继运行在服务器的 `8790` 端口，
 不直接暴露公网，再由站点域名反向代理为 `wss://`。
@@ -65,7 +104,7 @@ location /lan-ws {
 }
 ```
 
-重载 Nginx 后，应用会默认连接 `wss://当前域名/lan-ws`，无需开放公网 `8790` 端口。若构建时需要使用其他地址，可设置 `VITE_LAN_WS_URL` 后重新执行 `npm run build`。
+重载 Nginx 后，应用会默认连接 `wss://当前域名/lan-ws`，无需开放公网 `8790` 端口。若构建时需要使用其他地址，可在 `.env.lan` 中设置 `VITE_LAN_WS_URL` 后重新执行 `npm run build:lan`。
 
 ## 技术栈
 
@@ -119,7 +158,7 @@ src/
 - [ ] Word / Excel / PPT 预览
 - [ ] 分组 / 容器
 - [ ] 对齐参考线
-- [ ] 协作分享
+- [x] 局域网多人协作与主机持久化
 
 ## License
 

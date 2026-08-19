@@ -5,6 +5,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { useCanvasStore, type AlignMode } from '../store/canvasStore'
 import { exportCurrentProject } from '../io/importExport'
 import { LanPanel } from './LanPanel'
+import { IS_LAN_BUILD } from '../buildMode'
 import { STICKY_COLORS } from '../types'
 import {
   AlignBottomIcon,
@@ -283,7 +284,7 @@ export function Toolbar() {
 
       <div className="flex-1" />
 
-      <LanPanel />
+      {IS_LAN_BUILD && <LanPanel />}
 
       <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-edge2 p-0.5">
         <button type="button" title="缩小" className={btnCls} onClick={() => dispatchView('zoom-out')}>

@@ -79,6 +79,26 @@ export function FileIcon(props: IconProps) {
   )
 }
 
+export function OpenIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M14 3h7v7" />
+      <path d="M10 14L21 3" />
+      <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+    </Base>
+  )
+}
+
+export function DownloadIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M12 3v12" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M5 21h14" />
+    </Base>
+  )
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <Base {...props}>

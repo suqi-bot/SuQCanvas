@@ -31,6 +31,7 @@ import { DEFAULT_EDGE_STYLE } from '../types'
 import { mediaNodeTypes } from './nodes/nodeTypes'
 import { styledEdgeTypes } from './edges/edgeTypes'
 import { InspectorPanel } from '../components/InspectorPanel'
+import { sendLanCursor } from '../sync/lanClient'
 
 const MIN_ZOOM = 0.05
 const MAX_ZOOM = 8
@@ -42,7 +43,7 @@ function BoardInner() {
   const onEdgesChange = useCanvasStore((s) => s.onEdgesChange)
   const onConnect = useCanvasStore((s) => s.onConnect)
   const setViewport = useCanvasStore((s) => s.setViewport)
-  const { screenToFlowPosition, setViewport: rfSetViewport, fitView, zoomIn, zoomOut, setCenter } =
+  const { screenToFlowPosition, flowToScreenPosition, setViewport: rfSetViewport, fitView, zoomIn, zoomOut, setCenter } =
     useReactFlow()
   const storeApi = useStoreApi()
   const [dragging, setDragging] = useState(false)
@@ -53,6 +54,12 @@ function BoardInner() {
   const projectId = useProjectStore((s) => s.projectId)
   const theme = useSettingsStore((s) => s.theme)
   const isLight = theme === 'light'
+  const cursors = useLanStore((s) => s.cursors)
+  const selfId = useLanStore((s) => s.selfId)
+  const onMouseMove = useCallback((e: React.MouseEvent) => {
+    const p = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+    sendLanCursor(p.x, p.y)
+  }, [screenToFlowPosition])
 
   useEffect(() => {
     const vp = useCanvasStore.getState().viewport
@@ -304,6 +311,7 @@ function BoardInner() {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onMouseMove={onMouseMove}
       colorMode={theme}
       proOptions={{ hideAttribution: false }}
 className={`${dragging ? 'sq-drag-active' : ''} ${
@@ -326,6 +334,25 @@ className={`${dragging ? 'sq-drag-active' : ''} ${
         maskColor={isLight ? 'rgba(241, 245, 249, 0.72)' : 'rgba(2, 6, 23, 0.7)'}
         bgColor={isLight ? '#f8fafc' : '#0f172a'}
       />
+      {Object.values(cursors).filter((c) => c.userId !== selfId).map((cursor) => {
+        const p = flowToScreenPosition({ x: cursor.x, y: cursor.y })
+        return (
+          <div key={cursor.userId} className="pointer-events-none absolute z-40" style={{ left: p.x, top: p.y }}>
+            <div className="relative -translate-x-1 -translate-y-1">
+              <div
+                className="h-0 w-0 border-b-[12px] border-l-[5px] border-r-[5px] border-l-transparent border-r-transparent drop-shadow"
+                style={{ borderBottomColor: cursor.color }}
+              />
+              <span
+                className="absolute left-2 top-2 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] text-white shadow"
+                style={{ backgroundColor: cursor.color }}
+              >
+                {cursor.name}
+              </span>
+            </div>
+          </div>
+        )
+      })}
       {dragging && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center border-2 border-dashed border-sky-400/70 bg-sky-500/10">
           <span className="rounded-lg bg-[var(--panel)] px-4 py-2 text-sm text-[var(--accenttext)]">

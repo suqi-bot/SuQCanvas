@@ -1,9 +1,10 @@
 import { db, type ProjectRecord } from '../db/db'
 import { useCanvasStore } from '../store/canvasStore'
-import { useLanStore, type LanUser } from '../store/lanStore'
+import { useLanStore, type LanUser, type LanActivityKind } from '../store/lanStore'
 import { toast } from '../store/uiStore'
 import type { AssetMeta, SuqEdge, SuqNode } from '../types'
 import type { Viewport } from '@xyflow/react'
+import { getLanUserColor } from './lanColors'
 
 // 分片大小取 3 的倍数，使每个分片的 base64 都对齐到字节边界，
 // 各分片无填充 base64 拼接后才能精确还原原始数据
@@ -86,6 +87,39 @@ function send(obj: Record<string, unknown>): void {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj))
 }
 
+function roomSend(t: string, payload: Record<string, unknown>): void {
+  const projectId = useLanStore.getState().activeProjectId
+  if (!projectId || !isLanConnected()) return
+  send({ t, projectId, ...payload })
+}
+
+function parseProjectList(
+  value: unknown,
+): Array<{ id: string; name: string; updatedAt: number }> {
+  return ((value as Array<{ id?: string; name?: string; updatedAt?: number }>) ?? [])
+    .filter((project) => project?.id)
+    .map((project) => ({
+      id: String(project.id),
+      name: String(project.name ?? '未命名项目'),
+      updatedAt: Number(project.updatedAt) || 0,
+    }))
+}
+
+function parseUsers(value: unknown): LanUser[] {
+  return ((value as Array<Partial<LanUser>>) ?? [])
+    .filter((user) => user?.id)
+    .map((user) => {
+      const id = String(user.id)
+      return {
+        id,
+        name: String(user.name ?? '协作者'),
+        ip: String(user.ip ?? ''),
+        projectId: user.projectId ?? null,
+        color: getLanUserColor(id, user.color),
+      }
+    })
+}
+
 export function lanConnect(url: string, name: string): boolean {
   if (ws) {
     ws.onclose = null
@@ -107,11 +141,6 @@ export function lanConnect(url: string, name: string): boolean {
   store.setStatus('connecting')
   store.setUrl(resolvedUrl)
   store.setName(name)
-  try {
-    localStorage.setItem(LAN_STORAGE_KEY, JSON.stringify({ url: resolvedUrl, name }))
-  } catch {
-    // 忽略存储失败
-  }
 
   let sock: WebSocket
   try {
@@ -126,8 +155,15 @@ export function lanConnect(url: string, name: string): boolean {
 
   sock.onopen = () => {
     opened = true
+    try {
+      localStorage.setItem(LAN_STORAGE_KEY, JSON.stringify({ url: resolvedUrl, name }))
+    } catch {
+      // 忽略存储失败
+    }
     useLanStore.setState({ status: 'connected', followId: null, remoteViewport: null })
     send({ t: 'hello', name })
+    const activeProjectId = useLanStore.getState().activeProjectId
+    if (activeProjectId) send({ t: 'join-project', projectId: activeProjectId })
     toast('已连接局域网协作', 'success')
     // 加入后请求当前画布引用的素材
     const nodes = useCanvasStore.getState().nodes
@@ -145,6 +181,7 @@ export function lanConnect(url: string, name: string): boolean {
       followId: null,
       remoteViewport: null,
     })
+    useLanStore.getState().clearCollaborationState()
     useLanStore.getState().clearRemoteProjects()
     if (opened) toast('局域网连接已断开', 'error')
   }
@@ -182,6 +219,7 @@ export function lanDisconnect(): void {
     sock.close()
   }
   useLanStore.setState({ status: 'idle', users: [], followId: null, remoteViewport: null })
+  useLanStore.getState().clearCollaborationState()
   useLanStore.getState().clearRemoteProjects()
 }
 
@@ -203,80 +241,100 @@ function handleMessage(msg: LanMessage): void {
   switch (msg.t) {
     case 'welcome':
       lan.setSelfId(String(msg.id ?? ''))
-      lan.setUsers((msg.users as LanUser[]) ?? [])
-      void broadcastLocalProjects()
+      lan.setUsers(parseUsers(msg.users))
+      lan.setSharedProjects(parseProjectList(msg.projects))
       break
     case 'peer-joined': {
-      // 有新设备加入，把当前画布与项目列表定向发给它
+      // 同一项目有新设备加入，把当前画布定向发给它
       const targetId = String(msg.id ?? '')
       if (!targetId || targetId === lan.selfId) break
       const { nodes, edges } = useCanvasStore.getState()
-      send({ t: 'sync', to: targetId, nodes: stripSelected(nodes), edges })
-      void broadcastLocalProjects(targetId)
+      send({
+        t: 'sync',
+        to: targetId,
+        projectId: lan.activeProjectId,
+        nodes: stripSelected(nodes),
+        edges,
+      })
       break
     }
     case 'users':
-      lan.setUsers((msg.users as LanUser[]) ?? [])
+      lan.setUsers(parseUsers(msg.users))
       break
     case 'leave': {
       const id = String(msg.id ?? '')
       lan.removeUser(id)
-      lan.removeRemoteProjectsByOwner(id)
+      lan.removeCursor(id)
+      lan.clearEditing(id)
       break
     }
-    case 'project-list': {
-      const ownerId = String(msg.from ?? '')
-      if (!ownerId) break
-      const projects = ((msg.projects as Array<{ id?: string; name?: string; updatedAt?: number }>) ?? [])
-        .filter((p) => p?.id)
-        .map((p) => ({
-          id: String(p.id),
-          name: String(p.name ?? '未命名项目'),
-          updatedAt: Number(p.updatedAt) || 0,
-        }))
-      lan.mergeRemoteProjects(ownerId, projects)
+    case 'project-list':
+      lan.setSharedProjects(parseProjectList(msg.projects))
       break
-    }
-    case 'project-data-request': {
-      const fromId = String(msg.from ?? '')
+    case 'project-joined': {
       const projectId = String(msg.projectId ?? '')
-      if (!fromId || !projectId) break
-      void (async () => {
-        const rec = await db.projects.get(projectId)
-        if (!rec) return
-        send({
-          t: 'project-data',
-          to: fromId,
-          project: {
-            id: rec.id,
-            name: rec.name,
-            createdAt: rec.createdAt,
-            updatedAt: rec.updatedAt,
-            graph: rec.graph,
-            viewport: rec.viewport,
-          },
-        })
-      })()
+      if (!projectId || msg.exists !== false || lan.activeProjectId !== projectId) break
+      void db.projects.get(projectId).then((project) => {
+        if (project && useLanStore.getState().activeProjectId === projectId) {
+          saveProjectToLan(project)
+        }
+      })
       break
     }
     case 'project-data': {
       const project = msg.project as ProjectRecord | undefined
       if (!project?.id) break
       const waiters = projectDataWaiters.get(project.id)
-      if (!waiters || waiters.length === 0) break
-      projectDataWaiters.delete(project.id)
       void (async () => {
         try {
+          const local = await db.projects.get(project.id)
           await db.projects.put(project)
-          for (const w of waiters) w(project)
+          if (waiters?.length) {
+            projectDataWaiters.delete(project.id)
+            for (const w of waiters) w(project)
+          }
+          if (
+            lan.activeProjectId === project.id &&
+            (!local || project.updatedAt >= local.updatedAt)
+          ) {
+            const { useProjectStore } = await import('../store/projectStore')
+            if (useLanStore.getState().activeProjectId !== project.id) return
+            useCanvasStore.setState({
+              nodes: project.graph.nodes,
+              edges: project.graph.edges,
+              viewport: project.viewport,
+            })
+            useCanvasStore.getState().clearHistory()
+            useProjectStore.setState({
+              projectId: project.id,
+              projectName: project.name,
+              loaded: true,
+              saveStatus: 'saved',
+            })
+          }
         } catch {
-          for (const w of waiters) w(null)
+          if (waiters?.length) {
+            projectDataWaiters.delete(project.id)
+            for (const w of waiters) w(null)
+          }
         }
       })()
       break
     }
+    case 'project-deleted': {
+      const projectId = String(msg.projectId ?? '')
+      if (!projectId) break
+      void db.projects.delete(projectId)
+      if (lan.activeProjectId === projectId) {
+        lan.setActiveProjectId(null)
+        lan.clearCollaborationState()
+        toast('当前协作项目已从局域网主机删除', 'error')
+      }
+      break
+    }
     case 'sync': {
       if (msg.from === lan.selfId) return
+      if (msg.projectId && msg.projectId !== lan.activeProjectId) return
       const nodes = (msg.nodes as SuqNode[]) ?? []
       const edges = (msg.edges as SuqEdge[]) ?? []
       applyingRemote = true
@@ -308,6 +366,19 @@ function handleMessage(msg: LanMessage): void {
       }
       break
     }
+    case 'cursor':
+      if (msg.from === lan.selfId || msg.projectId !== lan.activeProjectId) return
+      lan.setCursor({ userId: String(msg.from ?? ''), name: String(msg.name ?? '协作者'), color: getLanUserColor(String(msg.from ?? ''), msg.color), x: Number(msg.x) || 0, y: Number(msg.y) || 0, updatedAt: Number(msg.updatedAt) || Date.now() })
+      break
+    case 'editing':
+      if (msg.from === lan.selfId || msg.projectId !== lan.activeProjectId) return
+      if (msg.active === false) lan.clearEditing(String(msg.from ?? ''))
+      else lan.setEditing({ userId: String(msg.from ?? ''), name: String(msg.name ?? '协作者'), color: getLanUserColor(String(msg.from ?? ''), msg.color), nodeId: String(msg.nodeId ?? ''), label: String(msg.label ?? '节点'), updatedAt: Number(msg.updatedAt) || Date.now() })
+      break
+    case 'activity':
+      if (msg.from === lan.selfId || msg.projectId !== lan.activeProjectId) return
+      lan.addActivity({ id: String(msg.id ?? `${msg.from}-${Date.now()}`), userId: String(msg.from ?? ''), name: String(msg.name ?? '协作者'), color: getLanUserColor(String(msg.from ?? ''), msg.color), kind: (msg.kind as LanActivityKind) || 'change', message: String(msg.message ?? ''), nodeId: msg.nodeId ? String(msg.nodeId) : undefined, createdAt: Number(msg.createdAt) || Date.now() })
+      break
     case 'asset-meta':
       receiveAssetMeta(msg)
       break
@@ -323,13 +394,16 @@ function handleMessage(msg: LanMessage): void {
 // ---------- 画布同步 ----------
 
 let lastSyncPayload: { nodes: SuqNode[]; edges: SuqEdge[]; viewport: Viewport } | null = null
+let previousGraph: { nodes: SuqNode[]; edges: SuqEdge[] } | null = null
+let activityTimer: ReturnType<typeof setTimeout> | null = null
+let pendingActivity: { kind: LanActivityKind; message: string; nodeId?: string } | null = null
 
 function stripSelected(nodes: SuqNode[]): SuqNode[] {
   return nodes.map((n) => (n.selected ? { ...n, selected: false } : n))
 }
 
 function scheduleSyncBroadcast(): void {
-  if (!isLanConnected() || applyingRemote) return
+  if (!isLanConnected() || applyingRemote || !useLanStore.getState().activeProjectId) return
   const { nodes, edges, viewport } = useCanvasStore.getState()
   lastSyncPayload = { nodes, edges, viewport }
   if (syncTimer) return
@@ -340,14 +414,31 @@ function scheduleSyncBroadcast(): void {
     if (!payload || !isLanConnected()) return
     send({
       t: 'sync',
+      projectId: useLanStore.getState().activeProjectId,
       nodes: stripSelected(payload.nodes),
       edges: payload.edges,
     })
   }, 150)
 }
 
+function scheduleActivity(kind: LanActivityKind, message: string, nodeId?: string): void {
+  if (!isLanConnected() || applyingRemote || !useLanStore.getState().activeProjectId) return
+  pendingActivity = { kind, message, nodeId }
+  if (activityTimer) return
+  activityTimer = setTimeout(() => {
+    activityTimer = null
+    const item = pendingActivity
+    pendingActivity = null
+    if (!item) return
+    const lan = useLanStore.getState()
+    const activity = { id: `${lan.selfId}-${Date.now()}`, userId: lan.selfId, name: lan.name || '我', color: getLanUserColor(lan.selfId, lan.users.find((user) => user.id === lan.selfId)?.color), ...item, createdAt: Date.now() }
+    lan.addActivity(activity)
+    roomSend('activity', activity)
+  }, 350)
+}
+
 function scheduleViewportBroadcast(): void {
-  if (!isLanConnected() || applyingRemote) return
+  if (!isLanConnected() || applyingRemote || !useLanStore.getState().activeProjectId) return
   const lan = useLanStore.getState()
   if (lan.followId) return // 跟随他人时不广播自己的视口
   if (vpTimer) return
@@ -355,7 +446,11 @@ function scheduleViewportBroadcast(): void {
     vpTimer = null
     if (!isLanConnected()) return
     if (useLanStore.getState().followId) return
-    send({ t: 'viewport', viewport: useCanvasStore.getState().viewport })
+    send({
+      t: 'viewport',
+      projectId: useLanStore.getState().activeProjectId,
+      viewport: useCanvasStore.getState().viewport,
+    })
   }, 100)
 }
 
@@ -363,6 +458,19 @@ export function initLanSync(): () => void {
   const unsub = useCanvasStore.subscribe((state, prev) => {
     if (state.nodes !== prev.nodes || state.edges !== prev.edges) {
       scheduleSyncBroadcast()
+      if (!previousGraph) previousGraph = { nodes: prev.nodes, edges: prev.edges }
+      const nodesChanged = state.nodes.length !== prev.nodes.length
+      const edgesChanged = state.edges.length !== prev.edges.length
+      if (nodesChanged) scheduleActivity(state.nodes.length > prev.nodes.length ? 'create' : 'delete', state.nodes.length > prev.nodes.length ? '新增节点' : '删除节点')
+      else if (edgesChanged) scheduleActivity('connect', '更新连线')
+      else {
+        const moved = state.nodes.some((n) => { const p = prev.nodes.find((x) => x.id === n.id); return p && (p.position.x !== n.position.x || p.position.y !== n.position.y) })
+        const edited = state.nodes.some((n) => { const p = prev.nodes.find((x) => x.id === n.id); return p && JSON.stringify(p.data) !== JSON.stringify(n.data) })
+        if (moved) scheduleActivity('move', '移动节点')
+        else if (edited) scheduleActivity('edit', '编辑节点')
+        else scheduleActivity('change', '更新画布')
+      }
+      previousGraph = { nodes: state.nodes, edges: state.edges }
     }
     if (state.viewport !== prev.viewport) {
       scheduleViewportBroadcast()
@@ -373,19 +481,58 @@ export function initLanSync(): () => void {
 
 // ---------- 项目同步 ----------
 
-/** 广播本机项目元数据列表（可定向发给指定设备） */
-export async function broadcastLocalProjects(toId?: string): Promise<void> {
+/** 刷新由局域网主机持久保存的共享项目列表。 */
+export async function broadcastLocalProjects(): Promise<void> {
   if (!isLanConnected()) return
-  const projects = await db.projects.toArray()
-  send({
-    t: 'project-list',
-    ...(toId ? { to: toId } : {}),
-    projects: projects.map((p) => ({
-      id: p.id,
-      name: p.name,
-      updatedAt: p.updatedAt,
-    })),
-  })
+  send({ t: 'project-list-request' })
+}
+
+/** 加入一个项目房间；实时画布、视口和素材只在该项目内传输。 */
+export function joinLanProject(projectId: string): void {
+  const lan = useLanStore.getState()
+  if (lan.activeProjectId === projectId) return
+  lan.setActiveProjectId(projectId)
+  lan.clearCollaborationState()
+  lan.setFollowId(null)
+  lan.clearRemoteViewport()
+  if (isLanConnected()) send({ t: 'join-project', projectId })
+}
+
+export function leaveLanProject(): void {
+  const lan = useLanStore.getState()
+  lan.setActiveProjectId(null)
+  lan.setFollowId(null)
+  lan.clearRemoteViewport()
+  lan.clearCollaborationState()
+  if (isLanConnected()) send({ t: 'leave-project' })
+}
+
+export function sendLanCursor(x: number, y: number): void {
+  const lan = useLanStore.getState()
+  roomSend('cursor', { x, y, name: lan.name, updatedAt: Date.now() })
+}
+
+export function setLanEditing(nodeId: string, label: string): void {
+  const lan = useLanStore.getState()
+  roomSend('editing', { nodeId, label, name: lan.name, active: true, updatedAt: Date.now() })
+}
+
+export function clearLanEditing(): void {
+  roomSend('editing', { active: false, name: useLanStore.getState().name, updatedAt: Date.now() })
+}
+
+/** 将项目快照保存到运行中继服务的局域网主机。 */
+export function saveProjectToLan(project: ProjectRecord): boolean {
+  if (!isLanConnected()) return false
+  send({ t: 'project-save', project })
+  return true
+}
+
+export function deleteProjectFromLan(projectId: string): boolean {
+  if (!isLanConnected()) return false
+  send({ t: 'project-delete', projectId })
+  if (useLanStore.getState().activeProjectId === projectId) leaveLanProject()
+  return true
 }
 
 /** 从局域网获取项目数据，成功（写入本地 db）返回项目记录 */

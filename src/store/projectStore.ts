@@ -9,7 +9,11 @@ import {
   updateProjectNameInCloud,
   upsertProjectToCloud,
 } from '../sync/cloudSync'
-import { broadcastLocalProjects } from '../sync/lanClient'
+import {
+  broadcastLocalProjects,
+  joinLanProject,
+  saveProjectToLan,
+} from '../sync/lanClient'
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -88,6 +92,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           initialized: true,
           saveStatus: 'saved',
         })
+        joinLanProject(latest.id)
       } else {
         useCanvasStore.getState().reset()
         useCanvasStore.getState().clearHistory()
@@ -126,6 +131,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         loaded: true,
         saveStatus: 'saved',
       })
+      joinLanProject(record.id)
     } catch (err) {
       console.error('打开项目失败', err)
       toast('打开项目失败', 'error')
@@ -158,6 +164,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         loaded: true,
         saveStatus: 'saved',
       })
+      joinLanProject(id)
+      saveProjectToLan(record)
       void broadcastLocalProjects()
     } finally {
       set({ busy: false })
@@ -168,6 +176,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await db.projects.update(id, { name })
     await updateProjectNameInCloud(id, name)
     if (get().projectId === id) set({ projectName: name })
+    const record = await db.projects.get(id)
+    if (record) saveProjectToLan(record)
     void broadcastLocalProjects()
   },
 
@@ -192,6 +202,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         updatedAt: record.updatedAt,
       })
       await upsertProjectToCloud(record)
+      saveProjectToLan(record)
       set({ saveStatus: 'saved' })
       void broadcastLocalProjects()
     } catch (err) {

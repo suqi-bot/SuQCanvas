@@ -9,6 +9,7 @@ import { useProjectStore } from './store/projectStore'
 import { useUiStore } from './store/uiStore'
 import { useAuthStore } from './store/authStore'
 import { initLanSync, autoReconnectLan } from './sync/lanClient'
+import { IS_LAN_BUILD } from './buildMode'
 
 export default function App() {
   const user = useAuthStore((s) => s.user)
@@ -17,9 +18,10 @@ export default function App() {
   const busy = useProjectStore((s) => s.busy)
 
   useEffect(() => {
-    void useAuthStore.getState().init().then(() => autoReconnectLan())
-    const stopLanSync = initLanSync()
-    return () => stopLanSync()
+    void useAuthStore.getState().init().then(() => {
+      if (IS_LAN_BUILD) autoReconnectLan()
+    })
+    if (IS_LAN_BUILD) return initLanSync()
   }, [])
 
   const entered = user || guest

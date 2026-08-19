@@ -9,10 +9,13 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-lan
 dist.zip
 lan-deploy.zip
+release/
 dist-ssr
 *.local
+server/data/
 
 # pdfjs static assets (copied by predev/prebuild)
 public/pdfjs
@@ -21,6 +24,8 @@ public/pdfjs
 .env
 .env.*
 !.env.example
+!.env.online
+!.env.lan
 
 # Editor directories and files
 .vscode/*

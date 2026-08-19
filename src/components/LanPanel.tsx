@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useLanStore } from '../store/lanStore'
 import { getDefaultLanUrl, lanConnect, lanDisconnect } from '../sync/lanClient'
 import { LanIcon } from '../canvas/nodes/Icons'
+import { getLanUserColor } from '../sync/lanColors'
 
 const inputCls =
   'w-full rounded-lg border border-edge2 bg-panel2 px-3 py-1.5 text-sm text-main outline-none placeholder:text-dim focus:border-sky-500'
@@ -19,6 +20,9 @@ export function LanPanel() {
   const selfId = useLanStore((s) => s.selfId)
   const users = useLanStore((s) => s.users)
   const followId = useLanStore((s) => s.followId)
+  const activeProjectId = useLanStore((s) => s.activeProjectId)
+  const editing = useLanStore((s) => s.editing)
+  const activities = useLanStore((s) => s.activities)
   const setFollowId = useLanStore((s) => s.setFollowId)
   const [open, setOpen] = useState(false)
   const [urlDraft, setUrlDraft] = useState(getDefaultLanUrl)
@@ -47,6 +51,8 @@ export function LanPanel() {
   }
 
   const others = users.filter((u) => u.id !== selfId)
+  const selfColor = getLanUserColor(selfId, users.find((user) => user.id === selfId)?.color)
+  const editingOthers = Object.values(editing).filter((item) => item.userId !== selfId)
 
   return (
     <div className="relative shrink-0">
@@ -98,20 +104,26 @@ export function LanPanel() {
           </form>
 
           <div className="mt-4">
-            <div className="mb-1.5 text-xs text-dim">在线用户（{others.length + 1}）</div>
+            <div className="mb-1.5 text-xs text-dim">
+              {activeProjectId ? `当前项目协作者（${others.length + 1}）` : '尚未打开协作项目'}
+            </div>
             <ul className="max-h-44 space-y-1 overflow-y-auto">
               {selfId && (
                 <li className="flex items-center justify-between rounded-md bg-hover/50 px-2.5 py-1.5">
-                  <span className="truncate text-sm text-soft">
-                    我（{name || '设备'}）
+                  <span className="flex min-w-0 items-center gap-2 text-sm text-soft">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: selfColor }} />
+                    <span className="truncate">我（{name || '设备'}）</span>
                   </span>
                 </li>
               )}
               {others.map((u) => (
                 <li key={u.id} className="flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 hover:bg-hover">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm text-soft">{u.name}</div>
-                    <div className="truncate text-xs text-dim">{u.ip || '局域网设备'}</div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: u.color }} />
+                    <div className="min-w-0">
+                      <div className="truncate text-sm text-soft">{u.name}</div>
+                      <div className="truncate text-xs text-dim">{u.ip || '局域网设备'}</div>
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -130,11 +142,37 @@ export function LanPanel() {
             </ul>
           </div>
 
+          {connected && activeProjectId && (
+            <div className="mt-3 border-t border-edge pt-3">
+              <div className="mb-1.5 text-xs text-dim">正在编辑</div>
+              <div className="space-y-1">
+                {editingOthers.map((item) => (
+                  <div key={item.userId} className="flex items-center gap-1.5 truncate text-xs text-soft">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+                    <span className="truncate"><span style={{ color: item.color }}>{item.name}</span> 正在编辑：{item.label}</span>
+                  </div>
+                ))}
+                {editingOthers.length === 0 && <div className="text-xs text-dim">暂无成员编辑</div>}
+              </div>
+              <div className="mb-1.5 mt-3 text-xs text-dim">最近活动</div>
+              <div className="max-h-36 space-y-1 overflow-y-auto">
+                {activities.slice(-20).reverse().map((item) => (
+                  <div key={item.id} className="text-xs text-soft">
+                    <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle" style={{ backgroundColor: item.color }} />
+                    <span style={{ color: item.color }}>{item.name}</span> {item.message}
+                    <span className="ml-1 text-[10px] text-dim">{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                ))}
+                {activities.length === 0 && <div className="text-xs text-dim">暂无活动记录</div>}
+              </div>
+            </div>
+          )}
+
           <p className="mt-3 border-t border-edge pt-2.5 text-[11px] leading-relaxed text-dim">
             宝塔部署默认使用同域名 <code className="rounded bg-hover px-1">/lan-ws</code> 反代；局域网直连可输入
             <code className="rounded bg-hover px-1">ws://IP:8790</code>。
             <br />
-            素材与画布操作将实时同步到所有连接设备。
+            项目按房间独立协作，并自动保存到运行中继服务的主机设备。
           </p>
         </div>
       )}

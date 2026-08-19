@@ -1,9 +1,21 @@
 import 'fake-indexeddb/auto'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { WebSocket } from 'ws'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../db/db'
-import { getDefaultLanUrl, lanConnect, requestAssetFromLan, bufToB64, b64ToUint8, resolveLanUrl } from './lanClient'
+import { useLanStore } from '../store/lanStore'
+import {
+  getDefaultLanUrl,
+  joinLanProject,
+  lanConnect,
+  requestAssetFromLan,
+  bufToB64,
+  b64ToUint8,
+  resolveLanUrl,
+} from './lanClient'
 
 // ws 的 WebSocket 与 DOM 类型不同，运行时行为兼容
 globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket
@@ -14,10 +26,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 let server: ChildProcess
 let A: WebSocket
+let dataDir: string
 
 beforeAll(async () => {
+  dataDir = await mkdtemp(join(tmpdir(), 'suqcanvas-lan-test-'))
   server = spawn('node', ['server/lan-server.mjs'], {
-    env: { ...process.env, PORT: String(PORT) },
+    env: { ...process.env, PORT: String(PORT), LAN_DATA_DIR: dataDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   server.stderr?.on('data', (d) => process.stderr.write(`[server] ${d}`))
@@ -28,17 +42,20 @@ beforeAll(async () => {
     A.on('error', rej)
   })
   A.send(JSON.stringify({ t: 'hello', name: 'device-A' }))
+  A.send(JSON.stringify({ t: 'join-project', projectId: 'test-project' }))
   lanConnect(`ws://127.0.0.1:${PORT}/lan-ws`, 'device-B')
+  joinLanProject('test-project')
   await sleep(800)
 }, 15000)
 
-afterAll(() => {
+afterAll(async () => {
   try {
     A?.close()
   } catch {
     // ignore
   }
   server?.kill()
+  if (dataDir) await rm(dataDir, { recursive: true, force: true })
 })
 
 // 模拟真实发送方：按 CHUNK 分片 → bufToB64（无填充）
@@ -129,4 +146,63 @@ describe('LAN 素材接收', () => {
     const got = new Uint8Array(await rec!.blob.arrayBuffer())
     expect(Array.from(got)).toEqual([0x59, 0x59, 0x58, 0x58])
   }, 15000)
+})
+
+describe('LAN 协作项目', () => {
+  it('为同时在线的协作者分配不同颜色', () => {
+    const users = useLanStore.getState().users
+    expect(users.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(users.map((user) => user.color)).size).toBe(users.length)
+    for (const user of users) expect(user.color).toMatch(/^#[0-9a-f]{6}$/i)
+  })
+
+  it('将项目快照持久保存到中继主机', async () => {
+    A.send(
+      JSON.stringify({
+        t: 'project-save',
+        project: {
+          id: 'test-project',
+          name: '共享项目',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          graph: { nodes: [], edges: [] },
+          viewport: { x: 0, y: 0, zoom: 1 },
+        },
+      }),
+    )
+    await sleep(400)
+    const projects = JSON.parse(await readFile(join(dataDir, 'projects.json'), 'utf8'))
+    expect(projects).toHaveLength(1)
+    expect(projects[0].name).toBe('共享项目')
+  })
+
+  it('不同项目房间不会互相转发画布消息', async () => {
+    const other = new WebSocket(`ws://127.0.0.1:${PORT}/lan-ws`)
+    await new Promise<void>((resolve, reject) => {
+      other.once('open', resolve)
+      other.once('error', reject)
+    })
+    other.send(JSON.stringify({ t: 'hello', name: 'device-C' }))
+    other.send(JSON.stringify({ t: 'join-project', projectId: 'other-project' }))
+    await sleep(100)
+
+    let leaked = false
+    const listener = (data: WebSocket.RawData) => {
+      const msg = JSON.parse(data.toString())
+      if (msg.t === 'sync' && msg.projectId === 'other-project') leaked = true
+    }
+    A.on('message', listener)
+    other.send(
+      JSON.stringify({
+        t: 'sync',
+        projectId: 'other-project',
+        nodes: [],
+        edges: [],
+      }),
+    )
+    await sleep(250)
+    A.off('message', listener)
+    other.close()
+    expect(leaked).toBe(false)
+  })
 })

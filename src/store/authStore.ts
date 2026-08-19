@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { AuthError, User } from '@supabase/supabase-js'
 import { supabase } from '../sync/supabaseClient'
 import { db } from '../db/db'
+import { IS_LAN_BUILD } from '../buildMode'
 import { useProjectStore } from './projectStore'
 import { useCanvasStore } from './canvasStore'
 
@@ -36,7 +37,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   init: async () => {
     const persistedGuest = localStorage.getItem(GUEST_KEY) === '1'
     if (!supabase) {
-      set({ guest: persistedGuest, loading: false })
+      let hasLanProfile = false
+      if (IS_LAN_BUILD) {
+        try {
+          const saved = JSON.parse(localStorage.getItem('sq:lan') ?? '{}') as {
+            url?: string
+            name?: string
+          }
+          hasLanProfile = Boolean(saved.url?.trim() && saved.name?.trim())
+        } catch {
+          // 无效配置按首次进入处理
+        }
+      }
+      set({ guest: IS_LAN_BUILD ? hasLanProfile : persistedGuest, loading: false })
       return
     }
     if (!listenerInstalled) {

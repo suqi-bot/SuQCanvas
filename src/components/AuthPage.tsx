@@ -1,7 +1,9 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { isCloudConfigured } from '../sync/supabaseClient'
+import { IS_LAN_BUILD } from '../buildMode'
 import { getDefaultLanUrl, lanConnect } from '../sync/lanClient'
+import { useLanStore } from '../store/lanStore'
 
 const inputCls =
   'w-full rounded-lg border border-edge2 bg-panel2 px-3 py-2 text-sm text-main outline-none placeholder:text-dim focus:border-sky-500'
@@ -16,19 +18,44 @@ export function AuthPage() {
   const [busy, setBusy] = useState(false)
   const [lanUrl, setLanUrl] = useState(getDefaultLanUrl)
   const [lanName, setLanName] = useState('')
+  const [waitingForLan, setWaitingForLan] = useState(false)
+  const lanStatus = useLanStore((s) => s.status)
+
+  useEffect(() => {
+    if (!waitingForLan) return
+    if (lanStatus === 'connected') {
+      setWaitingForLan(false)
+      setBusy(false)
+      enterGuest()
+    } else if (lanStatus === 'error') {
+      setWaitingForLan(false)
+      setBusy(false)
+      setError('连接失败，请检查局域网地址和中继服务')
+    }
+  }, [enterGuest, lanStatus, waitingForLan])
 
   const switchMode = (m: 'login' | 'register') => {
     setMode(m)
     setError(null)
   }
 
-  const handleEnterLan = () => {
+  const handleEnterLan = (e?: FormEvent) => {
+    e?.preventDefault()
+    if (busy) return
     const url = lanUrl.trim()
-    if (url) {
-      const started = lanConnect(url, lanName.trim() || `设备-${Math.random().toString(36).slice(2, 6)}`)
-      if (!started) return
+    const name = lanName.trim()
+    if (!url || !name) {
+      setError('请填写局域网地址和协作名称')
+      return
     }
-    enterGuest()
+    setError(null)
+    setBusy(true)
+    setWaitingForLan(true)
+    if (!lanConnect(url, name)) {
+      setWaitingForLan(false)
+      setBusy(false)
+      setError('局域网地址无效，请检查后重试')
+    }
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -43,6 +70,63 @@ export function AuthPage() {
     const err = await signIn(email.trim(), password)
     setBusy(false)
     if (err) setError(err)
+  }
+
+  if (IS_LAN_BUILD) {
+    return (
+      <div className="flex h-full items-center justify-center bg-app px-4 text-main">
+        <div className="w-full max-w-sm">
+          <div className="mb-8 text-center">
+            <div className="text-2xl font-bold tracking-wide">SuQCanvas</div>
+            <div className="mt-1 text-xs text-dim">连接局域网协作主机</div>
+          </div>
+          <form
+            onSubmit={handleEnterLan}
+            className="space-y-4 rounded-2xl border border-edge bg-panel p-6"
+          >
+            <div>
+              <label className="mb-1.5 block text-xs text-soft">局域网地址</label>
+              <input
+                required
+                autoFocus
+                value={lanUrl}
+                onChange={(e) => setLanUrl(e.target.value)}
+                placeholder="ws://服务器IP:8790"
+                autoComplete="url"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs text-soft">协作名称</label>
+              <input
+                required
+                maxLength={30}
+                value={lanName}
+                onChange={(e) => setLanName(e.target.value)}
+                placeholder="其他协作者看到的名称"
+                autoComplete="nickname"
+                className={inputCls}
+              />
+            </div>
+            {error && (
+              <div className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
+                {error}
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full rounded-lg bg-sky-600 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-500 disabled:cursor-wait disabled:opacity-50"
+            >
+              {busy ? '正在连接…' : '连接并进入'}
+            </button>
+            <p className="text-center text-[11px] leading-relaxed text-dim">
+              协作名称会显示给当前项目的其他成员；连接成功后会记住本设备配置
+            </p>
+          </form>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -103,33 +187,6 @@ export function AuthPage() {
               >
                 注册
               </button>
-            </div>
-            <div className="border-t border-edge pt-4">
-              <div className="mb-2 text-center text-xs text-dim">或使用局域网模式（无需登录）</div>
-              <div className="space-y-2">
-                <input
-                  value={lanUrl}
-                  onChange={(e) => setLanUrl(e.target.value)}
-                  placeholder="ws://服务器IP:8790 或 wss://域名/lan-ws"
-                  className={inputCls}
-                />
-                <input
-                  value={lanName}
-                  onChange={(e) => setLanName(e.target.value)}
-                  placeholder="你的昵称（默认自动生成）"
-                  className={inputCls}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleEnterLan}
-                className="mt-3 w-full rounded-lg border border-edge2 py-2 text-sm text-soft transition-colors hover:bg-hover hover:text-main"
-              >
-                连接并进入局域网模式
-              </button>
-              <p className="mt-2 text-center text-[11px] leading-relaxed text-dim">
-                输入中继服务器地址后进入，素材与画布操作将实时同步到所有连接设备，数据仅保存在本机
-              </p>
             </div>
           </form>
         ) : (

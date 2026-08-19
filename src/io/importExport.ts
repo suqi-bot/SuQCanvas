@@ -155,5 +155,6 @@ export async function importProjectFile(file: File): Promise<void> {
     viewport: json.viewport ?? { x: 0, y: 0, zoom: 1 },
   })
   await useProjectStore.getState().loadProject(id)
+  await useProjectStore.getState().saveNow()
   toast('项目导入成功', 'success')
 }

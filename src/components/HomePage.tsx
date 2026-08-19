@@ -9,12 +9,19 @@ import { useCanvasStore } from '../store/canvasStore'
 import { deleteProjectFromCloud, syncProjectList } from '../sync/cloudSync'
 import { isCloudConfigured } from '../sync/supabaseClient'
 import { isOssConfigured } from '../sync/ossClient'
+import { IS_ONLINE_BUILD } from '../buildMode'
 import { useAuthStore } from '../store/authStore'
 import { useLanStore } from '../store/lanStore'
-import { broadcastLocalProjects, fetchProjectFromLan } from '../sync/lanClient'
+import {
+  broadcastLocalProjects,
+  deleteProjectFromLan,
+  fetchProjectFromLan,
+  lanDisconnect,
+  leaveLanProject,
+} from '../sync/lanClient'
 import { STICKY_COLORS, type StickyColor, type SuqEdge, type SuqNode } from '../types'
 import type { Theme } from '../store/settingsStore'
-import { MoonIcon, PlusIcon, SunIcon } from '../canvas/nodes/Icons'
+import { LanIcon, MoonIcon, PlusIcon, SunIcon } from '../canvas/nodes/Icons'
 
 function fmtTime(ts: number): string {
   return new Date(ts).toLocaleString('zh-CN', {
@@ -419,6 +426,7 @@ export function HomePage() {
   const [renameValue, setRenameValue] = useState('')
   const importRef = useRef<HTMLInputElement | null>(null)
   const remoteProjects = useLanStore((s) => s.remoteProjects)
+  const lanName = useLanStore((s) => s.name)
 
   const refresh = useCallback(async () => {
     setProjects(await syncProjectList())
@@ -430,15 +438,16 @@ export function HomePage() {
 
   const remoteIdSet = useMemo(() => new Set(remoteProjects.map((r) => r.id)), [remoteProjects])
 
-  /** 本地列表不含该 id 且局域网中存在 → 视为远端项目 */
-  const isRemoteId = (id: string) =>
-    remoteIdSet.has(id) && !projects.some((p) => p.id === id)
+  const isSharedId = (id: string) => remoteIdSet.has(id)
+  const isRemoteOnlyId = (id: string) =>
+    isSharedId(id) && !projects.some((project) => project.id === id)
 
   /** 展示列表 = 本地项目 + 局域网远端项目（本地没有的） */
   const visibleProjects = useMemo(() => {
     const merged = [...projects]
     for (const r of remoteProjects) {
-      if (!merged.some((p) => p.id === r.id)) {
+      const localIndex = merged.findIndex((project) => project.id === r.id)
+      if (localIndex < 0) {
         merged.push({
           id: r.id,
           name: r.name,
@@ -447,6 +456,12 @@ export function HomePage() {
           graph: { nodes: [], edges: [] },
           viewport: { x: 0, y: 0, zoom: 1 },
         })
+      } else if (r.updatedAt > merged[localIndex].updatedAt) {
+        merged[localIndex] = {
+          ...merged[localIndex],
+          name: r.name,
+          updatedAt: r.updatedAt,
+        }
       }
     }
     return merged.sort((a, b) => b.updatedAt - a.updatedAt)
@@ -459,18 +474,31 @@ export function HomePage() {
     setOpen(false)
   }
 
+  const handleReturnToLanLogin = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await useProjectStore.getState().saveNow()
+      lanDisconnect()
+      await signOut()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const handleOpen = async (p: ProjectRecord) => {
-    if (isRemoteId(p.id)) {
+    let fetchedShared = false
+    if (isSharedId(p.id)) {
       const rec = await fetchProjectFromLan(p.id)
       if (!rec) {
         toast('无法从局域网获取该项目，设备可能已离线', 'error')
         return
       }
       await db.projects.put(rec)
-      void broadcastLocalProjects()
+      fetchedShared = true
       await refresh()
     }
-    if (p.id !== currentId) {
+    if (fetchedShared || p.id !== currentId) {
       await loadProject(p.id)
     }
     setOpen(false)
@@ -482,6 +510,7 @@ export function HomePage() {
     try {
       await db.projects.delete(p.id)
       await deleteProjectFromCloud(p.id)
+      if (isSharedId(p.id)) deleteProjectFromLan(p.id)
       await gcAssets()
       if (currentId === p.id) {
         const remaining = (await syncProjectList())[0]
@@ -496,6 +525,7 @@ export function HomePage() {
             loaded: false,
             saveStatus: 'idle',
           })
+          leaveLanProject()
         }
       }
       await refresh()
@@ -548,22 +578,30 @@ export function HomePage() {
         <header className="flex shrink-0 items-center gap-3">
           <span className="text-lg font-bold tracking-wide">SuQCanvas</span>
           <span className="text-xs text-dim">无限画布 · 项目总览</span>
-          {isCloudConfigured() ? (
-            <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
-              云同步已连接
-            </span>
+          {IS_ONLINE_BUILD ? (
+            <>
+              {isCloudConfigured() ? (
+                <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
+                  云同步已连接
+                </span>
+              ) : (
+                <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-500">
+                  本地模式（未配置 Supabase）
+                </span>
+              )}
+              {isOssConfigured() ? (
+                <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
+                  OSS 已连接
+                </span>
+              ) : (
+                <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-500">
+                  OSS 未配置
+                </span>
+              )}
+            </>
           ) : (
-            <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-500">
-              本地模式（未配置 Supabase）
-            </span>
-          )}
-          {isOssConfigured() ? (
-            <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
-              OSS 已连接
-            </span>
-          ) : (
-            <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-500">
-              OSS 未配置
+            <span className="rounded bg-violet-500/15 px-2 py-0.5 text-[11px] font-medium text-violet-400">
+              局域网版
             </span>
           )}
           <div className="flex-1" />
@@ -575,17 +613,34 @@ export function HomePage() {
               {user.email}
             </span>
           ) : (
-            <span className="rounded bg-violet-500/15 px-2 py-1 text-xs text-violet-400">
-              局域网模式
+            <span
+              className="max-w-40 truncate rounded bg-violet-500/15 px-2 py-1 text-xs text-violet-400"
+              title={`我的协作名称：${lanName || '未命名'}`}
+            >
+              {lanName || '局域网协作'}
             </span>
           )}
-          <button
-            type="button"
-            onClick={() => void signOut()}
-            className="rounded-md border border-edge2 px-3 py-1.5 text-xs text-soft hover:bg-hover"
-          >
-            {guest ? '返回登录' : '退出登录'}
-          </button>
+          {!IS_ONLINE_BUILD && (
+            <button
+              type="button"
+              onClick={() => void handleReturnToLanLogin()}
+              disabled={busy}
+              title="断开连接并返回局域网登录"
+              className="flex items-center gap-1.5 rounded-md border border-edge2 px-3 py-1.5 text-xs text-soft hover:bg-hover disabled:cursor-wait disabled:opacity-50"
+            >
+              <LanIcon />
+              局域网
+            </button>
+          )}
+          {IS_ONLINE_BUILD && (
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              className="rounded-md border border-edge2 px-3 py-1.5 text-xs text-soft hover:bg-hover"
+            >
+              {guest ? '返回登录' : '退出登录'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => importRef.current?.click()}
@@ -655,9 +710,9 @@ export function HomePage() {
                       当前
                     </span>
                   )}
-                  {isRemoteId(p.id) && (
+                  {isSharedId(p.id) && (
                     <span className="absolute bottom-2 right-2 rounded bg-violet-600/80 px-1.5 py-0.5 text-[10px] text-white">
-                      局域网
+                      共享
                     </span>
                   )}
                 </button>
@@ -685,7 +740,7 @@ export function HomePage() {
                       {p.name}
                     </button>
                   )}
-                  {!isRemoteId(p.id) && (
+                  {!isRemoteOnlyId(p.id) && (
                     <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                       <button
                         type="button"

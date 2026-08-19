@@ -4,6 +4,7 @@ import type { SuqNode } from '../../types'
 import { useCanvasStore } from '../../store/canvasStore'
 import { MediaNodeShell } from './MediaNodeShell'
 import { buildTextStyle, V_JUSTIFY } from './textStyle'
+import { setLanEditing, clearLanEditing } from '../../sync/lanClient'
 
 export const ShapeNode = memo(function ShapeNode(props: NodeProps<SuqNode>) {
   const { id, data } = props
@@ -26,6 +27,12 @@ export const ShapeNode = memo(function ShapeNode(props: NodeProps<SuqNode>) {
       ta?.select()
     }
   }, [editing])
+
+  useEffect(() => {
+    if (editing) setLanEditing(id, data.label ?? '形状')
+    else clearLanEditing()
+    return () => clearLanEditing()
+  }, [editing, id, data.label])
 
   const commit = (value: string) => {
     setEditing(false)

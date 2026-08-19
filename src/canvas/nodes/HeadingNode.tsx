@@ -4,6 +4,7 @@ import type { HeadingLevelOrNone, SuqNode } from '../../types'
 import { useCanvasStore } from '../../store/canvasStore'
 import { MediaNodeShell } from './MediaNodeShell'
 import { buildTextStyle, V_JUSTIFY } from './textStyle'
+import { setLanEditing, clearLanEditing } from '../../sync/lanClient'
 
 const LEVEL_STYLE: Record<HeadingLevelOrNone, string> = {
   0: 'text-base font-normal',
@@ -65,6 +66,12 @@ export const HeadingNode = memo(function HeadingNode(props: NodeProps<SuqNode>) 
       ta?.select()
     }
   }, [editing])
+
+  useEffect(() => {
+    if (editing) setLanEditing(id, data.label ?? `标题 ${level}`)
+    else clearLanEditing()
+    return () => clearLanEditing()
+  }, [editing, id, data.label, level])
 
   useEffect(() => {
     return () => {

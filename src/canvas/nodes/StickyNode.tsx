@@ -4,6 +4,7 @@ import { STICKY_COLORS, type SuqNode } from '../../types'
 import { useCanvasStore } from '../../store/canvasStore'
 import { MediaNodeShell } from './MediaNodeShell'
 import { buildTextStyle, V_JUSTIFY } from './textStyle'
+import { setLanEditing, clearLanEditing } from '../../sync/lanClient'
 
 export const StickyNode = memo(function StickyNode(props: NodeProps<SuqNode>) {
   const { id, data } = props
@@ -26,6 +27,12 @@ export const StickyNode = memo(function StickyNode(props: NodeProps<SuqNode>) {
       ta?.select()
     }
   }, [editing])
+
+  useEffect(() => {
+    if (editing) setLanEditing(id, data.label ?? '便签')
+    else clearLanEditing()
+    return () => clearLanEditing()
+  }, [editing, id, data.label])
 
   const commit = (value: string) => {
     setEditing(false)
