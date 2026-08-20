@@ -182,8 +182,10 @@ export async function loadLyricsFor(
   assetId: string,
   getRecord: (id: string) => Promise<{ blob: Blob; name: string } | undefined>,
   findLrcText: () => Promise<{ name: string; text: string } | undefined>,
+  cacheKey = '',
 ): Promise<LyricsResult> {
-  const cached = lyricsCache.get(assetId)
+  const key = `${assetId}:${cacheKey}`
+  const cached = lyricsCache.get(key)
   if (cached) return cached
   const result: LyricsResult = await (async () => {
     const lrc = await findLrcText()
@@ -198,6 +200,6 @@ export async function loadLyricsFor(
     }
     return {}
   })()
-  if (result.data) lyricsCache.set(assetId, result)
+  if (result.data) lyricsCache.set(key, result)
   return result
 }

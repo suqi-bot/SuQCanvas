@@ -20,8 +20,8 @@ import {
 } from '../canvas/nodes/Icons'
 import { db, type AssetRecord } from '../db/db'
 import { formatBytes } from '../media/fileKind'
-import { getAssetUrl, invalidateAllAssetUrls } from '../media/blobRegistry'
-import { baseName, loadLyricsFor, type LyricsData } from '../media/lyrics'
+import { getAssetUrl, getThumbnailUrl, invalidateAllAssetUrls } from '../media/blobRegistry'
+import { loadLyricsFor, type LyricsData } from '../media/lyrics'
 import { useAssetUrl } from '../media/useAssetUrl'
 import { fuzzyScore } from '../search/fuzzySearch'
 import { useCanvasStore } from '../store/canvasStore'
@@ -99,18 +99,19 @@ function AudioPlayerView({
   const [lyricsSource, setLyricsSource] = useState<string>()
   const [lyricsState, setLyricsState] = useState<'loading' | 'ready' | 'none'>('loading')
   const [lyricOffset, setLyricOffset] = useState(0)
-  const playing = usePlayerStore((s) => s.playing)
+  const [albumUrls, setAlbumUrls] = useState<string[]>([])
+  const [albumIndex, setAlbumIndex] = useState(0)
+  const playing = usePlayerStore((s) => s.trackPlaying)
   const volume = usePlayerStore((s) => s.volume)
   const muted = usePlayerStore((s) => s.muted)
-  const currentTime = usePlayerStore((s) => s.currentTime)
-  const duration = usePlayerStore((s) => s.duration)
+  const currentTime = usePlayerStore((s) => s.trackTime)
+  const duration = usePlayerStore((s) => s.trackDuration)
   const autoplayRef = useRef(true)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lineRefs = useRef(new Map<number, HTMLButtonElement>())
   const freezeUntilRef = useRef(0)
-  const filesRef = useRef(files)
-  filesRef.current = files
   const currentNameRef = useRef('')
+  const currentNodesRef = useRef<SuqNode[]>([])
 
   const orderedFiles = useMemo(() => {
     const result = [...mp3Files]
@@ -129,6 +130,7 @@ function AudioPlayerView({
   const url = useAssetUrl(current?.assetId)
   const hue = nameHue(current?.name ?? '')
   currentNameRef.current = current?.name ?? ''
+  currentNodesRef.current = current?.nodes ?? []
   const totalOffset = (lyrics?.offsetMs ?? 0) / 1000 + lyricOffset
   const progress = duration > 0 ? (Math.min(currentTime, duration) / duration) * 100 : 0
 
@@ -164,7 +166,7 @@ function AudioPlayerView({
     if (fileIndex < 0) return
     if (fileIndex === index) {
       const player = usePlayerStore.getState()
-      if (!player.playing) player.toggle()
+      if (!player.trackPlaying) player.toggle()
       return
     }
     autoplayRef.current = true
@@ -217,7 +219,7 @@ function AudioPlayerView({
     usePlayerStore.getState().setBarVisible(false)
     return () => {
       const state = usePlayerStore.getState()
-      if ((state.track && (state.playing || state.currentTime > 0)) || state.external) state.setBarVisible(true)
+      if ((state.track && (state.trackPlaying || state.trackTime > 0)) || state.external) state.setBarVisible(true)
     }
   }, [])
 
@@ -249,7 +251,26 @@ function AudioPlayerView({
     }
     setLyricsState('loading')
     let alive = true
-    const songName = currentNameRef.current
+    const mp3NodeIds = new Set(currentNodesRef.current.map((node) => node.id))
+    // 画布上与当前 mp3 通过连线关联的 .lrc 文件节点
+    const findConnectedLrc = (): string | undefined => {
+      const { nodes: canvasNodes, edges } = useCanvasStore.getState()
+      for (const edge of edges) {
+        const otherId = mp3NodeIds.has(edge.source) ? edge.target : mp3NodeIds.has(edge.target) ? edge.source : null
+        if (!otherId) continue
+        const otherNode = canvasNodes.find((node) => node.id === otherId)
+        if (otherNode?.data.assetId && /\.lrc$/i.test(otherNode.data.label ?? '')) {
+          return otherNode.data.assetId
+        }
+      }
+      return undefined
+    }
+    const connectedLrcAssetId = findConnectedLrc()
+    const readLrcText = async (lrcAssetId: string, fallbackName: string) => {
+      const record = await db.assets.get(lrcAssetId)
+      const text = record?.blob ? await record.blob.text() : await fetch(await getAssetUrl(lrcAssetId)).then((res) => res.text())
+      return { name: record?.name ?? fallbackName, text }
+    }
     void loadLyricsFor(
       assetId,
       async (id) => {
@@ -257,17 +278,14 @@ function AudioPlayerView({
         return record?.blob ? { blob: record.blob, name: record.name } : undefined
       },
       async () => {
-        const target = baseName(songName)
-        const lrcFile = filesRef.current.find((file) => file.assetId !== assetId && /\.lrc$/i.test(file.name) && baseName(file.name) === target)
-        if (!lrcFile) return undefined
+        if (!connectedLrcAssetId) return undefined
         try {
-          const record = await db.assets.get(lrcFile.assetId)
-          const text = record?.blob ? await record.blob.text() : await fetch(await getAssetUrl(lrcFile.assetId)).then((res) => res.text())
-          return { name: lrcFile.name, text }
+          return await readLrcText(connectedLrcAssetId, '歌词.lrc')
         } catch {
           return undefined
         }
       },
+      connectedLrcAssetId ?? '',
     ).then((result) => {
       if (!alive) return
       setLyrics(result.data ?? null)
@@ -278,6 +296,76 @@ function AudioPlayerView({
       alive = false
     }
   }, [current?.assetId])
+
+  // 收集画布上与当前 mp3 通过连线（串联/并联均可）关联的图片作为专辑背景
+  const findAlbumImages = (): string[] => {
+    const { nodes: canvasNodes, edges } = useCanvasStore.getState()
+    const startIds = new Set(currentNodesRef.current.map((node) => node.id))
+    const collected: string[] = []
+    const visited = new Set<string>(startIds)
+    const queue = [...startIds]
+    let hops = 0
+    while (queue.length > 0 && hops < 8) {
+      const size = queue.length
+      for (let i = 0; i < size; i++) {
+        const nodeId = queue[i]
+        for (const edge of edges) {
+          const otherId = edge.source === nodeId ? edge.target : edge.target === nodeId ? edge.source : null
+          if (!otherId || visited.has(otherId)) continue
+          visited.add(otherId)
+          const otherNode = canvasNodes.find((node) => node.id === otherId)
+          if (!otherNode) continue
+          if (otherNode.data.kind === 'audio') continue
+          if (otherNode.data.kind === 'image' && otherNode.data.assetId && !collected.includes(otherNode.data.assetId)) {
+            collected.push(otherNode.data.assetId)
+          }
+          queue.push(otherId)
+        }
+      }
+      queue.splice(0, size)
+      hops += 1
+    }
+    return collected
+  }
+
+  useEffect(() => {
+    const assetId = current?.assetId
+    setAlbumUrls([])
+    setAlbumIndex(0)
+    if (!assetId) return
+    const ids = findAlbumImages()
+    if (ids.length === 0) return
+    let alive = true
+    void Promise.all(
+      ids.map(async (id) => {
+        try {
+          const thumb = await getThumbnailUrl(id)
+          if (thumb) return thumb
+        } catch {
+          // 无缩略图时回退原图
+        }
+        try {
+          return await getAssetUrl(id)
+        } catch {
+          return undefined
+        }
+      }),
+    ).then((urls) => {
+      if (!alive) return
+      setAlbumUrls(urls.filter((url): url is string => Boolean(url)))
+    })
+    return () => {
+      alive = false
+    }
+  }, [current?.assetId])
+
+  useEffect(() => {
+    if (albumUrls.length < 2) return
+    const timer = setInterval(() => {
+      setAlbumIndex((value) => (value + 1) % albumUrls.length)
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [albumUrls.length])
 
   const activeIndex = useMemo(() => {
     if (!lyrics || lyrics.kind !== 'synced') return -1
@@ -313,14 +401,27 @@ function AudioPlayerView({
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-app text-main">
-      <div className="flex h-13 shrink-0 items-center gap-3 border-b border-edge bg-panel px-4">
+      {albumUrls.length > 0 && (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute inset-0 opacity-50">
+            <img
+              key={albumIndex}
+              src={albumUrls[Math.min(albumIndex, albumUrls.length - 1)]}
+              alt=""
+              className="sq-album-fade h-full w-full object-cover blur-[3px]"
+            />
+          </div>
+          <div className="absolute inset-0 bg-[var(--app)]/60" />
+        </div>
+      )}
+      <div className="relative z-10 flex h-13 shrink-0 items-center gap-3 border-b border-edge bg-panel px-4">
         <button type="button" className="rounded-md px-2 py-1 text-xs text-soft hover:bg-hover hover:text-main" onClick={onBack}>← 返回文件列表</button>
         <span className="flex items-center gap-2 text-sm font-medium"><AudioIcon className="text-sky-400" /> MP3 播放器</span>
         <div className="flex-1" />
         <span className="hidden text-xs text-dim sm:inline">共 {mp3Files.length} 首</span>
         <button type="button" title="关闭播放器" aria-label="关闭播放器" className="rounded-md p-1.5 text-soft hover:bg-hover hover:text-main" onClick={onBack}><CloseIcon /></button>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col lg:flex-row">
         <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-edge bg-panel lg:w-72 lg:border-b-0 lg:border-r xl:w-80">
           <div className="flex items-center gap-2 border-b border-edge px-3 py-2.5">
             <span className="text-xs font-medium text-soft">音乐列表</span>
@@ -488,7 +589,7 @@ function AudioPlayerView({
                 <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
                   <AudioIcon className="h-8 w-8 text-faint" />
                   <p className="text-xs text-dim">暂无歌词</p>
-                  <p className="max-w-64 text-[11px] leading-relaxed text-faint">上传与歌曲同名的 .lrc 文件即可自动匹配；内嵌歌词（ID3）的 MP3 也会自动识别</p>
+                  <p className="max-w-64 text-[11px] leading-relaxed text-faint">导入 .lrc 文件并在画布上连线指向该歌曲即可作为歌词；内嵌歌词（ID3）的 MP3 自动识别</p>
                 </div>
               )}
             </div>

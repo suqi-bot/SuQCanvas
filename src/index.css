@@ -412,6 +412,21 @@ body {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
+/* MP3 播放器：专辑背景图轮播淡入 */
+.sq-album-fade {
+  animation: sq-album-fade 0.9s ease both;
+}
+
+@keyframes sq-album-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 .sq-markdown {
   font-size: 13px;
   line-height: 1.65;

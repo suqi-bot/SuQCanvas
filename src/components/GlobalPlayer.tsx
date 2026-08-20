@@ -16,7 +16,8 @@ function fmtTime(seconds: number): string {
 export function GlobalPlayer() {
   const track = usePlayerStore((s) => s.track)
   const external = usePlayerStore((s) => s.external)
-  const playing = usePlayerStore((s) => s.playing)
+  const trackPlaying = usePlayerStore((s) => s.trackPlaying)
+  const externalPlaying = usePlayerStore((s) => s.externalPlaying)
   const currentTime = usePlayerStore((s) => s.currentTime)
   const duration = usePlayerStore((s) => s.duration)
   const volume = usePlayerStore((s) => s.volume)
@@ -80,8 +81,9 @@ export function GlobalPlayer() {
     el.muted = muted
   }, [volume, muted])
 
-  const usingExternal = external !== null && (track === null || !playing)
+  const usingExternal = external !== null && (externalPlaying || track === null)
   const shown = barVisible && (track !== null || external !== null)
+  const playing = usingExternal ? externalPlaying : trackPlaying
 
   const name = usingExternal ? external!.name : (track?.name ?? '')
   const onToggle = () => {
@@ -118,11 +120,11 @@ export function GlobalPlayer() {
         ref={audioRef}
         src={track?.url}
         preload="metadata"
-        onPlay={() => usePlayerStore.setState({ playing: true })}
-        onPause={() => usePlayerStore.setState({ playing: false })}
-        onTimeUpdate={(event) => usePlayerStore.setState({ currentTime: event.currentTarget.currentTime })}
-        onLoadedMetadata={(event) => usePlayerStore.setState({ duration: event.currentTarget.duration })}
-        onDurationChange={(event) => usePlayerStore.setState({ duration: event.currentTarget.duration })}
+        onPlay={() => usePlayerStore.setState({ trackPlaying: true })}
+        onPause={() => usePlayerStore.setState({ trackPlaying: false })}
+        onTimeUpdate={(event) => usePlayerStore.setState({ trackTime: event.currentTarget.currentTime, currentTime: event.currentTarget.currentTime })}
+        onLoadedMetadata={(event) => usePlayerStore.setState({ trackDuration: event.currentTarget.duration, duration: event.currentTarget.duration })}
+        onDurationChange={(event) => usePlayerStore.setState({ trackDuration: event.currentTarget.duration, duration: event.currentTarget.duration })}
         onEnded={() => notifyPlayerEnded()}
       />
       {shown && (

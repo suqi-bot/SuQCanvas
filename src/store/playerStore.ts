@@ -15,7 +15,10 @@ export interface ExternalAudio {
 interface PlayerState {
   track: PlayerTrack | null
   external: ExternalAudio | null
-  playing: boolean
+  trackPlaying: boolean
+  trackTime: number
+  trackDuration: number
+  externalPlaying: boolean
   currentTime: number
   duration: number
   volume: number
@@ -69,7 +72,10 @@ function requestPlay(el: HTMLAudioElement): void {
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   track: null,
   external: null,
-  playing: false,
+  trackPlaying: false,
+  trackTime: 0,
+  trackDuration: 0,
+  externalPlaying: false,
   currentTime: 0,
   duration: 0,
   volume: 1,
@@ -77,16 +83,33 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   barVisible: false,
   setTrack: (track, opts) => {
     const el = audioElement
-    const prev = get().track
+    const state = get()
+    const prev = state.track
+    const external = state.external
     if (track && prev && prev.assetId === track.assetId && prev.url === track.url) {
       if (opts?.autoplay && el && el.paused) requestPlay(el)
       return
     }
-    set({ track, playing: false, currentTime: 0, duration: 0 })
+    // 从画布元素接管同一首曲目时，接续播放进度与状态
+    let carryTime: number | undefined
+    let wasPlaying = false
+    if (track && external && external.assetId === track.assetId && !external.element.paused) {
+      carryTime = external.element.currentTime
+      wasPlaying = true
+    }
+    set({
+      track,
+      trackPlaying: wasPlaying,
+      trackTime: carryTime ?? 0,
+      trackDuration: 0,
+      currentTime: carryTime ?? 0,
+      duration: 0,
+    })
     if (el) {
       if (track) {
         el.src = track.url
         el.load()
+        if (carryTime !== undefined) el.currentTime = carryTime
         if (opts?.autoplay) requestPlay(el)
       } else {
         el.pause()
@@ -107,13 +130,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
     if (external) {
       const el = external.element
+      // 与全局共享音量/静音状态
+      el.volume = get().volume
+      el.muted = get().muted
       // loadedmetadata 可能在注册监听之前就已触发（preload=metadata），直接读取当前值补齐
       set({
+        externalPlaying: !el.paused,
         currentTime: el.currentTime,
         duration: Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0,
       })
-      const onPlay = () => set({ playing: true })
-      const onPause = () => set({ playing: false })
+      const onPlay = () => set({ externalPlaying: true })
+      const onPause = () => set({ externalPlaying: false })
       const onTime = () => set({ currentTime: el.currentTime })
       const onDuration = () => set({ duration: Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0 })
       el.addEventListener('play', onPlay)
@@ -131,6 +158,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           el.removeEventListener('durationchange', onDuration)
         },
       }
+    } else {
+      set({ external: null, externalPlaying: false })
     }
     set({ external })
   },
@@ -145,14 +174,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (el && Number.isFinite(el.duration) && el.duration > 0) {
       el.currentTime = Math.max(0, Math.min(time, el.duration))
     }
-    set({ currentTime: el ? el.currentTime : time })
+    set({ trackTime: el ? el.currentTime : time, currentTime: el ? el.currentTime : time })
   },
   seekBy: (delta) => {
     const el = audioElement
     if (!el || !get().track) return
     const max = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : el.currentTime + delta
     el.currentTime = Math.max(0, Math.min(el.currentTime + delta, max))
-    set({ currentTime: el.currentTime })
+    set({ trackTime: el.currentTime, currentTime: el.currentTime })
   },
   setVolume: (value) => {
     set({ volume: value, muted: value === 0 })
@@ -167,7 +196,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       el.removeAttribute('src')
       el.load()
     }
-    set({ track: null, playing: false, currentTime: 0, duration: 0, barVisible: false })
+    set({
+      track: null,
+      trackPlaying: false,
+      trackTime: 0,
+      trackDuration: 0,
+      currentTime: 0,
+      duration: 0,
+      barVisible: false,
+    })
   },
   setBarVisible: (barVisible) => {
     set({ barVisible })
