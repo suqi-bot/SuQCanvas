@@ -1,9 +1,19 @@
-import { memo, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import type { SuqNode } from '../../types'
+import { db } from '../../db/db'
+import { getAssetUrl } from '../../media/blobRegistry'
 import { useAssetUrl } from '../../media/useAssetUrl'
+import { registerAudio } from '../../media/mediaCoordinator'
+import { usePlayerStore } from '../../store/playerStore'
+import { toast } from '../../store/uiStore'
 import { MediaNodeShell } from './MediaNodeShell'
-import { MuteIcon, PauseIcon, PlayIcon, VolumeIcon } from './Icons'
+import { DownloadIcon, MuteIcon, PauseIcon, PlayIcon, VolumeIcon } from './Icons'
+import { useCanvasStore } from '../../store/canvasStore'
+
+// Keep mounted audio elements discoverable so a connected audio node can start
+// playback without coupling nodes to one another through React props.
+const audioRegistry = new Map<string, HTMLAudioElement>()
 
 function fmtTime(seconds: number): string {
   if (!Number.isFinite(seconds)) return '0:00'
@@ -20,6 +30,30 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
   const [duration, setDuration] = useState(0)
   const [muted, setMuted] = useState(false)
   const [volume, setVolume] = useState(1)
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    audioRegistry.set(props.id, audio)
+    const unregister = registerAudio(audio)
+    return () => {
+      unregister()
+      if (audioRegistry.get(props.id) === audio) audioRegistry.delete(props.id)
+      const player = usePlayerStore.getState()
+      if (player.external?.element === audio) player.setExternal(null)
+    }
+  }, [props.id, url])
+
+  const playConnectedAudio = () => {
+    const { edges, nodes } = useCanvasStore.getState()
+    const next = edges
+      .filter((edge) => edge.source === props.id)
+      .map((edge) => nodes.find((node) => node.id === edge.target))
+      .find((node) => node?.data.kind === 'audio')
+    if (!next) return
+    const target = audioRegistry.get(next.id)
+    if (target) void target.play().catch(() => undefined)
+  }
 
   const toggle = () => {
     const audio = audioRef.current
@@ -48,6 +82,23 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
     if (audioRef.current) audioRef.current.muted = next
   }
 
+  const download = async () => {
+    if (!props.data.assetId) return
+    try {
+      const url = await getAssetUrl(props.data.assetId)
+      const record = await db.assets.get(props.data.assetId)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = record?.name ?? props.data.label ?? 'audio.mp3'
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      toast('已开始下载', 'success')
+    } catch {
+      toast('下载失败', 'error')
+    }
+  }
+
   return (
     <MediaNodeShell node={props}>
       <div className="flex flex-col gap-2 p-3">
@@ -58,9 +109,18 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
             preload="metadata"
             onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
             onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-            onPlay={() => setPlaying(true)}
+            onPlay={(e) => {
+              setPlaying(true)
+              if (!props.data.assetId) return
+              const player = usePlayerStore.getState()
+              player.setExternal({ assetId: props.data.assetId, name: props.data.label ?? '音频', element: e.currentTarget })
+              player.setBarVisible(true)
+            }}
             onPause={() => setPlaying(false)}
-            onEnded={() => setPlaying(false)}
+            onEnded={() => {
+              setPlaying(false)
+              playConnectedAudio()
+            }}
           />
         )}
         <div className="flex items-center gap-2">
@@ -103,6 +163,15 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
             onChange={(e) => setVol(Number(e.target.value))}
             className="nodrag h-1 w-16 cursor-pointer accent-sky-500"
           />
+          <button
+            type="button"
+            onClick={() => void download()}
+            disabled={!url}
+            title="下载"
+            className="nodrag ml-auto rounded p-1.5 text-mid hover:bg-hover hover:text-main disabled:opacity-35"
+          >
+            <DownloadIcon />
+          </button>
         </div>
       </div>
     </MediaNodeShell>

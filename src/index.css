@@ -325,6 +325,93 @@ body {
   color: var(--toasterr-fg);
 }
 
+/* MP3 播放器：旋转唱片 */
+.sq-disc {
+  animation: sq-spin 16s linear infinite;
+  will-change: transform;
+}
+
+.sq-disc-paused {
+  animation-play-state: paused;
+}
+
+@keyframes sq-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* MP3 播放器：列表中的播放均衡器动画 */
+.sq-eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+
+.sq-eq span {
+  width: 3px;
+  border-radius: 1px;
+  background: #38bdf8;
+  height: 12px;
+  animation: sq-eq-bounce 0.9s ease-in-out infinite;
+}
+
+.sq-eq span:nth-child(2) {
+  animation-delay: 0.25s;
+}
+
+.sq-eq span:nth-child(3) {
+  animation-delay: 0.5s;
+}
+
+@keyframes sq-eq-bounce {
+  0%,
+  100% {
+    height: 3px;
+  }
+
+  50% {
+    height: 12px;
+  }
+}
+
+/* MP3 播放器：进度条与音量条 */
+.sq-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, #38bdf8 var(--sq-fill, 0%), var(--edge2) var(--sq-fill, 0%));
+  outline: none;
+  cursor: pointer;
+}
+
+.sq-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--main);
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transition: transform 0.12s ease;
+}
+
+.sq-range::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+
+.sq-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--main);
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
 .sq-markdown {
   font-size: 13px;
   line-height: 1.65;

@@ -1,6 +1,9 @@
 import { useReactFlow } from '@xyflow/react'
 import { useCanvasStore, type LayerMode } from '../store/canvasStore'
 import { useLanStore } from '../store/lanStore'
+import { db } from '../db/db'
+import { getAssetUrl } from '../media/blobRegistry'
+import { toast } from '../store/uiStore'
 import type {
   ArrowPos,
   EdgeStyle,
@@ -15,6 +18,7 @@ import type {
 import { STICKY_COLORS } from '../types'
 import {
   CopyIcon,
+  DownloadIcon,
   TextAlignBottomIcon,
   TextAlignCenterIcon,
   TextAlignJustifyIcon,
@@ -188,6 +192,24 @@ export function InspectorPanel() {
 
   const firstEdge = selectedEdges[0]
   const firstNode = selectedEditableNodes[0]
+
+  const downloadNodeAsset = async () => {
+    const assetId = firstNode.data.assetId
+    if (!assetId) return
+    try {
+      const url = await getAssetUrl(assetId)
+      const record = await db.assets.get(assetId)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = record?.name ?? firstNode.data.label ?? 'audio.mp3'
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      toast('已开始下载', 'success')
+    } catch {
+      toast('下载失败', 'error')
+    }
+  }
 
   return (
     <aside className="absolute bottom-3 right-3 top-3 z-30 w-64 select-none overflow-y-auto rounded-xl border border-edge bg-panel/95 text-main shadow-2xl">
@@ -534,13 +556,33 @@ export function InspectorPanel() {
                 </div>
               </Section>
               <Section title="操作">
-                <button
-                  type="button"
-                  onClick={() => duplicateNode(firstNode.id)}
-                  className="flex items-center gap-1.5 rounded-md border border-edge2 px-2.5 py-1.5 text-xs text-soft hover:bg-hover"
-                >
-                  <CopyIcon /> 复制元素
-                </button>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => duplicateNode(firstNode.id)}
+                    className="flex items-center gap-1.5 rounded-md border border-edge2 px-2.5 py-1.5 text-xs text-soft hover:bg-hover"
+                  >
+                    <CopyIcon /> 复制元素
+                  </button>
+                  {firstNode.data.kind === 'audio' && firstNode.data.assetId && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void downloadNodeAsset()}
+                        className="flex items-center gap-1.5 rounded-md border border-edge2 px-2.5 py-1.5 text-xs text-soft hover:bg-hover"
+                      >
+                        <DownloadIcon /> 下载
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteElements({ nodes: [{ id: firstNode.id }] })}
+                        className="flex items-center gap-1.5 rounded-md border border-rose-500/30 px-2.5 py-1.5 text-xs text-rose-500 hover:bg-rose-500/10"
+                      >
+                        <TrashIcon /> 删除
+                      </button>
+                    </>
+                  )}
+                </div>
               </Section>
             </>
           )}

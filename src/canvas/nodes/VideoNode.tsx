@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import type { SuqNode } from '../../types'
 import { useAssetUrl, useThumbnailUrl } from '../../media/useAssetUrl'
+import { registerVideo } from '../../media/mediaCoordinator'
 import { useCanvasStore } from '../../store/canvasStore'
 import { MediaNodeShell } from './MediaNodeShell'
 
@@ -14,7 +15,15 @@ export const VideoNode = memo(function VideoNode(props: NodeProps<SuqNode>) {
   const onNodesChange = useCanvasStore((s) => s.onNodesChange)
   const fittedRef = useRef(false)
   const boxRef = useRef<HTMLDivElement | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const unregisterRef = useRef<(() => void) | null>(null)
   const [nearViewport, setNearViewport] = useState(true)
+
+  useEffect(() => {
+    return () => {
+      unregisterRef.current?.()
+    }
+  }, [])
 
   useEffect(() => {
     const el = boxRef.current
@@ -56,6 +65,11 @@ export const VideoNode = memo(function VideoNode(props: NodeProps<SuqNode>) {
           <div className="h-20 w-20 animate-pulse rounded bg-hover/60" />
         ) : nearViewport ? (
           <video
+            ref={(el) => {
+              videoRef.current = el
+              unregisterRef.current?.()
+              unregisterRef.current = el ? registerVideo(el) : null
+            }}
             src={url}
             controls
             preload="metadata"
