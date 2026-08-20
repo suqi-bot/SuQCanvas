@@ -31,12 +31,15 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
   const volume = usePlayerStore((s) => s.volume)
   const muted = usePlayerStore((s) => s.muted)
   const track = usePlayerStore((s) => s.track)
+  const source = usePlayerStore((s) => s.source)
   const trackPlaying = usePlayerStore((s) => s.trackPlaying)
   const trackTime = usePlayerStore((s) => s.trackTime)
   const trackDuration = usePlayerStore((s) => s.trackDuration)
 
-  // 与全局播放器联动：播放器（或播放器悬浮栏）正在播放同一首歌时，元素展示并控制全局播放
-  const linkedToTrack = track !== null && track.assetId === props.data.assetId
+  // 与全局播放器联动：当播放器（track）是当前接管来源且正在播放同一首歌时，
+  // 节点镜像全局曲目的播放状态与进度；否则按节点自身状态展示
+  const linkedToTrack =
+    source === 'track' && track !== null && track.assetId === props.data.assetId
   const showPlaying = linkedToTrack ? trackPlaying : playing
   const showTime = linkedToTrack ? trackTime : time
   const showDuration = linkedToTrack ? trackDuration : duration
@@ -69,14 +72,28 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
       .find((node) => node?.data.kind === 'audio')
     if (!next) return
     const target = audioRegistry.get(next.id)
-    if (target) void target.play().catch(() => undefined)
+    if (!target) return
+    // 切换下一首时从头开始播放
+    target.currentTime = 0
+    // 数据未就绪时 play() 可能被拒绝，先尝试，失败后在 canplay 时重试
+    const tryPlay = () => {
+      void target.play().catch(() => {
+        target.addEventListener(
+          'canplay',
+          () => void target.play().catch(() => undefined),
+          { once: true },
+        )
+      })
+    }
+    if (target.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) tryPlay()
+    else {
+      target.addEventListener('loadeddata', tryPlay, { once: true })
+      tryPlay()
+    }
   }
 
   const toggle = () => {
-    if (linkedToTrack) {
-      usePlayerStore.getState().toggle()
-      return
-    }
+    // 始终播放/暂停本节点自身的音频，保证节点连接后的连续播放始终生效
     const audio = audioRef.current
     if (!audio) return
     if (audio.paused) void audio.play()

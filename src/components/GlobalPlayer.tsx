@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, ForwardIcon, PauseIcon, PlayIcon, RewindIcon } from '../canvas/nodes/Icons'
 import { registerAudio } from '../media/mediaCoordinator'
 import { bindPlayerAudio, notifyPlayerEnded, usePlayerStore } from '../store/playerStore'
+import { useUiStore } from '../store/uiStore'
 
 function fmtTime(seconds: number): string {
   const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0
@@ -14,6 +15,7 @@ function fmtTime(seconds: number): string {
 // 支持两种来源：MP3 播放器（track，关闭播放器后继续接管）和画布音频节点（external）。
 // 关闭悬浮栏才会停止并隐藏。
 export function GlobalPlayer() {
+  const source = usePlayerStore((s) => s.source)
   const track = usePlayerStore((s) => s.track)
   const external = usePlayerStore((s) => s.external)
   const trackPlaying = usePlayerStore((s) => s.trackPlaying)
@@ -81,11 +83,16 @@ export function GlobalPlayer() {
     el.muted = muted
   }, [volume, muted])
 
-  const usingExternal = external !== null && (externalPlaying || track === null)
+  const usingExternal = source === 'external' && external !== null
   const shown = barVisible && (track !== null || external !== null)
   const playing = usingExternal ? externalPlaying : trackPlaying
 
   const name = usingExternal ? external!.name : (track?.name ?? '')
+  const onOpenPlayer = () => {
+    const player = usePlayerStore.getState()
+    const assetId = player.source === 'external' ? player.external?.assetId : player.track?.assetId
+    if (assetId) useUiStore.getState().openMusicPlayer(assetId)
+  }
   const onToggle = () => {
     if (usingExternal) {
       const el = external!.element
@@ -106,12 +113,8 @@ export function GlobalPlayer() {
     }
   }
   const onClose = () => {
-    const player = usePlayerStore.getState()
-    if (player.external) {
-      player.external.element.pause()
-      player.setExternal(null)
-    }
-    player.stop()
+    // 仅隐藏悬浮栏，音乐继续播放，通过工具栏 CD 图标重新打开播放器
+    usePlayerStore.getState().setBarVisible(false)
   }
 
   return (
@@ -144,7 +147,14 @@ export function GlobalPlayer() {
             <div className="min-w-0 max-w-52">
               <div className="flex items-center gap-2">
                 {playing && <span className="sq-eq shrink-0"><span /><span /><span /></span>}
-                <span className="truncate text-xs font-medium" title={name}>{name}</span>
+                <button
+                  type="button"
+                  onClick={onOpenPlayer}
+                  className="truncate text-xs font-medium hover:text-sky-400"
+                  title="打开音乐播放器"
+                >
+                  {name}
+                </button>
               </div>
               <div className="mt-0.5 text-[10px] tabular-nums text-dim">{fmtTime(currentTime)} / {fmtTime(duration)}</div>
             </div>

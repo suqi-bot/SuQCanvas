@@ -341,6 +341,16 @@ body {
   }
 }
 
+/* 工具栏：音乐 CD 图标旋转 */
+.sq-cd-spin {
+  animation: sq-spin 4s linear infinite;
+  will-change: transform;
+}
+
+.sq-cd-paused {
+  animation-play-state: paused;
+}
+
 /* MP3 播放器：列表中的播放均衡器动画 */
 .sq-eq {
   display: inline-flex;

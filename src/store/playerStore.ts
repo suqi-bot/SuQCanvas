@@ -15,6 +15,8 @@ export interface ExternalAudio {
 interface PlayerState {
   track: PlayerTrack | null
   external: ExternalAudio | null
+  /** 当前由悬浮窗接管控制的来源：'track'（播放器）或 'external'（画布音频节点） */
+  source: 'track' | 'external' | null
   trackPlaying: boolean
   trackTime: number
   trackDuration: number
@@ -72,6 +74,7 @@ function requestPlay(el: HTMLAudioElement): void {
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   track: null,
   external: null,
+  source: null,
   trackPlaying: false,
   trackTime: 0,
   trackDuration: 0,
@@ -86,16 +89,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const state = get()
     const prev = state.track
     const external = state.external
-    if (track && prev && prev.assetId === track.assetId && prev.url === track.url) {
-      if (opts?.autoplay && el && el.paused) requestPlay(el)
-      return
-    }
-    // 从画布元素接管同一首曲目时，接续播放进度与状态
+    const sameTrack = track !== null && prev !== null && prev.assetId === track.assetId && prev.url === track.url
+    // 同一首曲目正由画布节点（external）播放时，接续进度并由全局播放器接管
     let carryTime: number | undefined
     let wasPlaying = false
     if (track && external && external.assetId === track.assetId && !external.element.paused) {
       carryTime = external.element.currentTime
       wasPlaying = true
+    }
+    if (sameTrack) {
+      if ((opts?.autoplay || wasPlaying) && el && el.paused) requestPlay(el)
+      if (wasPlaying) external?.element.pause()
+      set({ source: 'track' })
+      return
     }
     set({
       track,
@@ -104,13 +110,20 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       trackDuration: 0,
       currentTime: carryTime ?? 0,
       duration: 0,
+      source: track ? 'track' : external ? 'external' : null,
     })
     if (el) {
       if (track) {
         el.src = track.url
         el.load()
         if (carryTime !== undefined) el.currentTime = carryTime
-        if (opts?.autoplay) requestPlay(el)
+        if (wasPlaying) {
+          // 接管画布节点正在播放的同一曲目：暂停节点音频，改由全局播放器继续播放
+          external?.element.pause()
+          requestPlay(el)
+        } else if (opts?.autoplay) {
+          requestPlay(el)
+        }
       } else {
         el.pause()
         el.removeAttribute('src')
@@ -121,7 +134,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setExternal: (external) => {
     const prev = get().external
     if (external && prev && prev.element === external.element) {
-      set({ external: { ...prev, name: external.name } })
+      set({ external: { ...prev, name: external.name }, source: 'external' })
       return
     }
     if (externalWired) {
@@ -135,9 +148,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       el.muted = get().muted
       // loadedmetadata 可能在注册监听之前就已触发（preload=metadata），直接读取当前值补齐
       set({
+        external,
         externalPlaying: !el.paused,
         currentTime: el.currentTime,
         duration: Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0,
+        source: 'external',
       })
       const onPlay = () => set({ externalPlaying: true })
       const onPause = () => set({ externalPlaying: false })
@@ -159,9 +174,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         },
       }
     } else {
-      set({ external: null, externalPlaying: false })
+      set({ external: null, externalPlaying: false, source: get().track ? 'track' : null })
     }
-    set({ external })
   },
   toggle: () => {
     const el = audioElement
@@ -196,8 +210,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       el.removeAttribute('src')
       el.load()
     }
+    const ext = get().external
+    if (ext) ext.element.pause()
+    if (externalWired) {
+      externalWired.detach()
+      externalWired = null
+    }
     set({
       track: null,
+      external: null,
+      externalPlaying: false,
+      source: null,
       trackPlaying: false,
       trackTime: 0,
       trackDuration: 0,

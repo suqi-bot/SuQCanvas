@@ -4,6 +4,7 @@ import { useUiStore, type ToolMode } from '../store/uiStore'
 import { useProjectStore, type SaveStatus } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useCanvasStore, type AlignMode } from '../store/canvasStore'
+import { usePlayerStore } from '../store/playerStore'
 import { exportCurrentProject } from '../io/importExport'
 import { LanPanel } from './LanPanel'
 import { IS_LAN_BUILD } from '../buildMode'
@@ -16,6 +17,7 @@ import {
   AlignLeftIcon,
   AlignRightIcon,
   AlignTopIcon,
+  CdIcon,
   ConnectIcon,
   DistributeHIcon,
   DistributeVIcon,
@@ -116,6 +118,15 @@ export function Toolbar() {
   const redo = useCanvasStore((s) => s.redo)
   const alignSelected = useCanvasStore((s) => s.alignSelected)
   const selectedCount = useCanvasStore((s) => s.nodes.filter((n) => n.selected).length)
+  const track = usePlayerStore((s) => s.track)
+  const external = usePlayerStore((s) => s.external)
+  const source = usePlayerStore((s) => s.source)
+  const trackPlaying = usePlayerStore((s) => s.trackPlaying)
+  const externalPlaying = usePlayerStore((s) => s.externalPlaying)
+  const hasAudio = track !== null || external !== null
+  const audioPlaying = source === 'external' ? externalPlaying : trackPlaying
+  const barVisible = usePlayerStore((s) => s.barVisible)
+  const showCd = hasAudio && !barVisible
 
   useEffect(() => {
     if (!menuOpen) return
@@ -329,6 +340,17 @@ export function Toolbar() {
       )}
 
       <div className="flex-1" />
+
+      {showCd && (
+        <button
+          type="button"
+          title={audioPlaying ? '音乐播放中，点击重新打开悬浮窗' : '音乐已暂停，点击重新打开悬浮窗'}
+          className="shrink-0 rounded-md p-1.5 text-mid transition-colors hover:bg-hover hover:text-main"
+          onClick={() => usePlayerStore.getState().setBarVisible(true)}
+        >
+          <CdIcon className={`text-base ${audioPlaying ? 'sq-cd-spin text-sky-500' : 'sq-cd-paused text-faint'}`} />
+        </button>
+      )}
 
       {IS_LAN_BUILD && <LanPanel />}
 

@@ -50,6 +50,16 @@ export function AudioIcon(props: IconProps) {
   )
 }
 
+export function CdIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="2.5" />
+      <path d="M17.5 6.5l2-2" />
+    </Base>
+  )
+}
+
 export function TextIcon(props: IconProps) {
   return (
     <Base {...props}>
