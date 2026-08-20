@@ -171,6 +171,102 @@ export function MuteIcon(props: IconProps) {
   )
 }
 
+export function PrevIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M18 5v14L7 12z" fill="currentColor" strokeWidth="0" />
+      <rect x="4" y="5" width="2.4" height="14" rx="0.8" fill="currentColor" strokeWidth="0" />
+    </Base>
+  )
+}
+
+export function NextIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M6 5v14l11-7z" fill="currentColor" strokeWidth="0" />
+      <rect x="17.6" y="5" width="2.4" height="14" rx="0.8" fill="currentColor" strokeWidth="0" />
+    </Base>
+  )
+}
+
+export function SequentialIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4 6h11M4 12h11M4 18h7" />
+      <path d="M18 15l4-3-4-3" />
+    </Base>
+  )
+}
+
+export function ShuffleIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M16 3h5v5" />
+      <path d="M4 20L21 3" />
+      <path d="M21 16v5h-5" />
+      <path d="M15 15l6 6" />
+      <path d="M4 4l5 5" />
+    </Base>
+  )
+}
+
+export function RepeatIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M17 2l4 4-4 4" />
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+      <path d="M7 22l-4-4 4-4" />
+      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+    </Base>
+  )
+}
+
+export function RepeatOneIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M17 2l4 4-4 4" />
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+      <path d="M7 22l-4-4 4-4" />
+      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+      <path d="M11 10h1v4" fill="currentColor" strokeWidth="0" />
+    </Base>
+  )
+}
+
+export function ChevronLeftIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M15 5l-7 7 7 7" />
+    </Base>
+  )
+}
+
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M9 5l7 7-7 7" />
+    </Base>
+  )
+}
+
+export function RewindIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M11 5L3 12l8 7z" fill="currentColor" strokeWidth="0" />
+      <path d="M21 5l-8 7 8 7z" fill="currentColor" strokeWidth="0" />
+    </Base>
+  )
+}
+
+export function ForwardIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M13 5l8 7-8 7z" fill="currentColor" strokeWidth="0" />
+      <path d="M3 5l8 7-8 7z" fill="currentColor" strokeWidth="0" />
+    </Base>
+  )
+}
+
 export function SunIcon(props: IconProps) {
   return (
     <Base {...props}>

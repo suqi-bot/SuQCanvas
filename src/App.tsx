@@ -7,6 +7,7 @@ import { PdfViewerModal } from './components/PdfViewerModal'
 import { ImageViewerModal } from './components/ImageViewerModal'
 import { MarkdownViewerModal } from './components/MarkdownViewerModal'
 import { FileManagerModal } from './components/FileManagerModal'
+import { GlobalPlayer } from './components/GlobalPlayer'
 import { AuthPage } from './components/AuthPage'
 import { useProjectStore } from './store/projectStore'
 import { useUiStore } from './store/uiStore'
@@ -55,6 +56,7 @@ export default function App() {
       <ImageViewerModal />
       <MarkdownViewerModal />
       <FileManagerModal />
+      <GlobalPlayer />
       <Toasts />
       {busy && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--overlay)]">

@@ -1,16 +1,13 @@
 import { memo, useEffect, useState, type ReactNode } from 'react'
 import {
   Handle,
-  NodeToolbar,
   Position,
-  useReactFlow,
   useUpdateNodeInternals,
   type NodeProps,
 } from '@xyflow/react'
-import { useCanvasStore } from '../../store/canvasStore'
 import { useUiStore } from '../../store/uiStore'
 import type { SuqNode } from '../../types'
-import { CopyIcon, KindIcon, TrashIcon } from './Icons'
+import { KindIcon } from './Icons'
 import { useLanStore } from '../../store/lanStore'
 
 const HANDLE_SIDES = [
@@ -33,9 +30,7 @@ export const MediaNodeShell = memo(function MediaNodeShell({
 }: ShellProps) {
   const { id, data, selected } = node
   const [hovered, setHovered] = useState(false)
-  const { deleteElements } = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
-  const duplicateNode = useCanvasStore((s) => s.duplicateNode)
   const tool = useUiStore((s) => s.tool)
   const lock = useLanStore((s) =>
     Object.values(s.editing).find((item) => item.nodeId === id && item.userId !== s.selfId),
@@ -132,27 +127,6 @@ export const MediaNodeShell = memo(function MediaNodeShell({
           </span>
         </div>
       )}
-
-      <NodeToolbar position={Position.Top} isVisible={hovered && !selected && tool !== 'connect'}>
-        <div className="flex gap-1 rounded-lg border border-edge bg-panel p-1 shadow-xl">
-          <button
-            type="button"
-            title="复制"
-            className="rounded-md p-1.5 text-soft hover:bg-hover"
-            onClick={() => duplicateNode(id)}
-          >
-            <CopyIcon />
-          </button>
-          <button
-            type="button"
-            title="删除"
-            className="rounded-md p-1.5 text-rose-500 hover:bg-hover"
-            onClick={() => deleteElements({ nodes: [{ id }] })}
-          >
-            <TrashIcon />
-          </button>
-        </div>
-      </NodeToolbar>
     </div>
   )
 })

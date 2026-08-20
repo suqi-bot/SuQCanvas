@@ -1,18 +1,32 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
+  AudioIcon,
   CloseIcon,
   DownloadIcon,
   KindIcon,
+  MuteIcon,
+  NextIcon,
   OpenIcon,
+  PauseIcon,
+  PlayIcon,
+  PrevIcon,
+  RepeatIcon,
+  RepeatOneIcon,
   SearchIcon,
+  SequentialIcon,
+  ShuffleIcon,
   TrashIcon,
+  VolumeIcon,
 } from '../canvas/nodes/Icons'
 import { db, type AssetRecord } from '../db/db'
 import { formatBytes } from '../media/fileKind'
-import { getAssetUrl, invalidateAllAssetUrls } from '../media/blobRegistry'
+import { getAssetUrl, getThumbnailUrl, invalidateAllAssetUrls } from '../media/blobRegistry'
+import { loadLyricsFor, type LyricsData } from '../media/lyrics'
+import { useAssetUrl } from '../media/useAssetUrl'
 import { fuzzyScore } from '../search/fuzzySearch'
 import { useCanvasStore } from '../store/canvasStore'
 import { useLanStore } from '../store/lanStore'
+import { setPlayerEndedHandler, usePlayerStore } from '../store/playerStore'
 import { useProjectStore } from '../store/projectStore'
 import { toast, useUiStore } from '../store/uiStore'
 import type { MediaKind, SuqNode } from '../types'
@@ -30,6 +44,560 @@ interface TypeGroup {
   id: string
   label: string
   kinds: MediaKind[]
+}
+
+type PlaybackMode = 'sequential' | 'random' | 'loop' | 'single'
+
+function isMp3(file: ManagedFile): boolean {
+  return file.kind === 'audio' && (file.mime.toLowerCase() === 'audio/mpeg' || /\.mp3$/i.test(file.name))
+}
+
+const MODE_ORDER: PlaybackMode[] = ['sequential', 'loop', 'single', 'random']
+
+const MODE_LABELS: Record<PlaybackMode, string> = {
+  sequential: '顺序播放',
+  random: '随机播放',
+  loop: '列表循环',
+  single: '单曲循环',
+}
+
+function formatTime(seconds: number): string {
+  const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0
+  const minutes = Math.floor(safe / 60)
+  const secs = Math.floor(safe % 60)
+  return `${minutes}:${String(secs).padStart(2, '0')}`
+}
+
+function nameHue(name: string): number {
+  let hash = 0
+  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) % 360
+  return hash
+}
+
+function ModeGlyph({ mode }: { mode: PlaybackMode }) {
+  if (mode === 'random') return <ShuffleIcon />
+  if (mode === 'single') return <RepeatOneIcon />
+  if (mode === 'loop') return <RepeatIcon />
+  return <SequentialIcon />
+}
+
+function AudioPlayerView({
+  files,
+  initialAssetId,
+  onBack,
+}: {
+  files: ManagedFile[]
+  initialAssetId: string
+  onBack: () => void
+}) {
+  const mp3Files = useMemo(() => files.filter(isMp3), [files])
+  const [sort, setSort] = useState<'default' | 'title' | 'importer'>('default')
+  const [mode, setMode] = useState<PlaybackMode>('sequential')
+  const [query, setQuery] = useState('')
+  const [index, setIndex] = useState(() => Math.max(0, mp3Files.findIndex((file) => file.assetId === initialAssetId)))
+  const [lyrics, setLyrics] = useState<LyricsData | null>(null)
+  const [lyricsSource, setLyricsSource] = useState<string>()
+  const [lyricsState, setLyricsState] = useState<'loading' | 'ready' | 'none'>('loading')
+  const [lyricOffset, setLyricOffset] = useState(0)
+  const [albumUrls, setAlbumUrls] = useState<string[]>([])
+  const [albumIndex, setAlbumIndex] = useState(0)
+  const playing = usePlayerStore((s) => s.trackPlaying)
+  const volume = usePlayerStore((s) => s.volume)
+  const muted = usePlayerStore((s) => s.muted)
+  const currentTime = usePlayerStore((s) => s.trackTime)
+  const duration = usePlayerStore((s) => s.trackDuration)
+  const autoplayRef = useRef(true)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const lineRefs = useRef(new Map<number, HTMLButtonElement>())
+  const freezeUntilRef = useRef(0)
+  const currentNameRef = useRef('')
+  const currentNodesRef = useRef<SuqNode[]>([])
+
+  const orderedFiles = useMemo(() => {
+    const result = [...mp3Files]
+    if (sort === 'title') result.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+    else if (sort === 'importer') result.sort((a, b) => (a.nodes[0]?.data.createdByName ?? '').localeCompare(b.nodes[0]?.data.createdByName ?? '', 'zh-CN') || a.name.localeCompare(b.name, 'zh-CN'))
+    return result
+  }, [mp3Files, sort])
+  const visibleFiles = useMemo(() => {
+    const keyword = query.normalize('NFKC').toLocaleLowerCase().trim()
+    if (!keyword) return orderedFiles
+    return orderedFiles.filter(
+      (file) => file.name.toLocaleLowerCase().includes(keyword) || (file.nodes[0]?.data.createdByName ?? '').toLocaleLowerCase().includes(keyword),
+    )
+  }, [orderedFiles, query])
+  const current = orderedFiles[index] ?? orderedFiles[0]
+  const url = useAssetUrl(current?.assetId)
+  const hue = nameHue(current?.name ?? '')
+  currentNameRef.current = current?.name ?? ''
+  currentNodesRef.current = current?.nodes ?? []
+  const totalOffset = (lyrics?.offsetMs ?? 0) / 1000 + lyricOffset
+  const progress = duration > 0 ? (Math.min(currentTime, duration) / duration) * 100 : 0
+
+  const nextTrack = (wrap: boolean): boolean => {
+    if (orderedFiles.length < 2) return false
+    if (mode === 'random') {
+      let next = index
+      while (next === index) next = Math.floor(Math.random() * orderedFiles.length)
+      setIndex(next)
+      return true
+    }
+    if (index < orderedFiles.length - 1) {
+      setIndex(index + 1)
+      return true
+    }
+    if (mode === 'loop' || wrap) {
+      setIndex(0)
+      return true
+    }
+    return false
+  }
+  const prevTrack = () => {
+    autoplayRef.current = true
+    setIndex(index > 0 ? index - 1 : orderedFiles.length - 1)
+  }
+  const toggle = () => usePlayerStore.getState().toggle()
+  const cycleMode = () => setMode((currentMode) => MODE_ORDER[(MODE_ORDER.indexOf(currentMode) + 1) % MODE_ORDER.length])
+  const applyVolume = (value: number) => usePlayerStore.getState().setVolume(value)
+  const seekTo = (time: number) => usePlayerStore.getState().seekTo(Math.max(0, time - totalOffset))
+  const seekProgress = (value: number) => usePlayerStore.getState().seekTo(value)
+  const selectTrack = (file: ManagedFile) => {
+    const fileIndex = orderedFiles.findIndex((item) => item.assetId === file.assetId)
+    if (fileIndex < 0) return
+    if (fileIndex === index) {
+      const player = usePlayerStore.getState()
+      if (!player.trackPlaying) player.toggle()
+      return
+    }
+    autoplayRef.current = true
+    setIndex(fileIndex)
+  }
+  const downloadCurrent = async () => {
+    if (!current) return
+    try {
+      const url = await getAssetUrl(current.assetId)
+      const record = await db.assets.get(current.assetId)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = record?.name ?? current.name
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      toast('已开始下载', 'success')
+    } catch {
+      toast('下载失败', 'error')
+    }
+  }
+
+  useEffect(() => {
+    setIndex((currentIndex) => Math.min(currentIndex, Math.max(0, orderedFiles.length - 1)))
+  }, [orderedFiles.length])
+
+  useEffect(() => {
+    const assetId = current?.assetId
+    if (!assetId) {
+      usePlayerStore.getState().setTrack(null)
+      return
+    }
+    let alive = true
+    void getAssetUrl(assetId)
+      .then((resolvedUrl) => {
+        if (!alive) return
+        usePlayerStore.getState().setTrack(
+          { assetId, name: currentNameRef.current, url: resolvedUrl },
+          { autoplay: autoplayRef.current },
+        )
+        autoplayRef.current = false
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [current?.assetId])
+
+  useEffect(() => {
+    usePlayerStore.getState().setBarVisible(false)
+    return () => {
+      const state = usePlayerStore.getState()
+      if ((state.track && (state.trackPlaying || state.trackTime > 0)) || state.external) state.setBarVisible(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    setPlayerEndedHandler(() => {
+      if (mode === 'single') {
+        const player = usePlayerStore.getState()
+        player.seekTo(0)
+        player.toggle()
+      } else {
+        // 顺序播放最后一首播完即停；列表循环/随机自然播完时从头或随机继续
+        autoplayRef.current = nextTrack(mode === 'loop')
+      }
+    })
+    return () => setPlayerEndedHandler(null)
+  })
+
+  useEffect(() => {
+    setLyricOffset(0)
+  }, [current?.assetId])
+
+  useEffect(() => {
+    const assetId = current?.assetId
+    setLyrics(null)
+    setLyricsSource(undefined)
+    if (!assetId) {
+      setLyricsState('none')
+      return
+    }
+    setLyricsState('loading')
+    let alive = true
+    const mp3NodeIds = new Set(currentNodesRef.current.map((node) => node.id))
+    // 画布上与当前 mp3 通过连线关联的 .lrc 文件节点
+    const findConnectedLrc = (): string | undefined => {
+      const { nodes: canvasNodes, edges } = useCanvasStore.getState()
+      for (const edge of edges) {
+        const otherId = mp3NodeIds.has(edge.source) ? edge.target : mp3NodeIds.has(edge.target) ? edge.source : null
+        if (!otherId) continue
+        const otherNode = canvasNodes.find((node) => node.id === otherId)
+        if (otherNode?.data.assetId && /\.lrc$/i.test(otherNode.data.label ?? '')) {
+          return otherNode.data.assetId
+        }
+      }
+      return undefined
+    }
+    const connectedLrcAssetId = findConnectedLrc()
+    const readLrcText = async (lrcAssetId: string, fallbackName: string) => {
+      const record = await db.assets.get(lrcAssetId)
+      const text = record?.blob ? await record.blob.text() : await fetch(await getAssetUrl(lrcAssetId)).then((res) => res.text())
+      return { name: record?.name ?? fallbackName, text }
+    }
+    void loadLyricsFor(
+      assetId,
+      async (id) => {
+        const record = await db.assets.get(id)
+        return record?.blob ? { blob: record.blob, name: record.name } : undefined
+      },
+      async () => {
+        if (!connectedLrcAssetId) return undefined
+        try {
+          return await readLrcText(connectedLrcAssetId, '歌词.lrc')
+        } catch {
+          return undefined
+        }
+      },
+      connectedLrcAssetId ?? '',
+    ).then((result) => {
+      if (!alive) return
+      setLyrics(result.data ?? null)
+      setLyricsSource(result.sourceName)
+      setLyricsState(result.data ? 'ready' : 'none')
+    })
+    return () => {
+      alive = false
+    }
+  }, [current?.assetId])
+
+  // 收集画布上与当前 mp3 通过连线（串联/并联均可）关联的图片作为专辑背景
+  const findAlbumImages = (): string[] => {
+    const { nodes: canvasNodes, edges } = useCanvasStore.getState()
+    const startIds = new Set(currentNodesRef.current.map((node) => node.id))
+    const collected: string[] = []
+    const visited = new Set<string>(startIds)
+    const queue = [...startIds]
+    let hops = 0
+    while (queue.length > 0 && hops < 8) {
+      const size = queue.length
+      for (let i = 0; i < size; i++) {
+        const nodeId = queue[i]
+        for (const edge of edges) {
+          const otherId = edge.source === nodeId ? edge.target : edge.target === nodeId ? edge.source : null
+          if (!otherId || visited.has(otherId)) continue
+          visited.add(otherId)
+          const otherNode = canvasNodes.find((node) => node.id === otherId)
+          if (!otherNode) continue
+          if (otherNode.data.kind === 'audio') continue
+          if (otherNode.data.kind === 'image' && otherNode.data.assetId && !collected.includes(otherNode.data.assetId)) {
+            collected.push(otherNode.data.assetId)
+          }
+          queue.push(otherId)
+        }
+      }
+      queue.splice(0, size)
+      hops += 1
+    }
+    return collected
+  }
+
+  useEffect(() => {
+    const assetId = current?.assetId
+    setAlbumUrls([])
+    setAlbumIndex(0)
+    if (!assetId) return
+    const ids = findAlbumImages()
+    if (ids.length === 0) return
+    let alive = true
+    void Promise.all(
+      ids.map(async (id) => {
+        try {
+          const thumb = await getThumbnailUrl(id)
+          if (thumb) return thumb
+        } catch {
+          // 无缩略图时回退原图
+        }
+        try {
+          return await getAssetUrl(id)
+        } catch {
+          return undefined
+        }
+      }),
+    ).then((urls) => {
+      if (!alive) return
+      setAlbumUrls(urls.filter((url): url is string => Boolean(url)))
+    })
+    return () => {
+      alive = false
+    }
+  }, [current?.assetId])
+
+  useEffect(() => {
+    if (albumUrls.length < 2) return
+    const timer = setInterval(() => {
+      setAlbumIndex((value) => (value + 1) % albumUrls.length)
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [albumUrls.length])
+
+  const activeIndex = useMemo(() => {
+    if (!lyrics || lyrics.kind !== 'synced') return -1
+    const t = currentTime + totalOffset
+    let found = -1
+    for (let i = 0; i < lyrics.lines.length; i++) {
+      if (lyrics.lines[i].time <= t) found = i
+      else break
+    }
+    return found
+  }, [lyrics, currentTime, totalOffset])
+
+  useEffect(() => {
+    if (activeIndex < 0 || Date.now() < freezeUntilRef.current) return
+    const container = scrollRef.current
+    const line = lineRefs.current.get(activeIndex)
+    if (!container || !line) return
+    const containerRect = container.getBoundingClientRect()
+    const lineRect = line.getBoundingClientRect()
+    const top = container.scrollTop + lineRect.top - containerRect.top - containerRect.height / 2 + lineRect.height / 2
+    container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+  }, [activeIndex])
+
+  useEffect(() => {
+    lineRefs.current.clear()
+    freezeUntilRef.current = 0
+    scrollRef.current?.scrollTo({ top: 0 })
+  }, [lyrics])
+
+  if (!current) {
+    return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-app text-sm text-dim">没有可播放的 MP3 文件</div>
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex flex-col bg-app text-main">
+      {albumUrls.length > 0 && (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute inset-0 opacity-50">
+            <img
+              key={albumIndex}
+              src={albumUrls[Math.min(albumIndex, albumUrls.length - 1)]}
+              alt=""
+              className="sq-album-fade h-full w-full object-cover blur-[3px]"
+            />
+          </div>
+          <div className="absolute inset-0 bg-[var(--app)]/60" />
+        </div>
+      )}
+      <div className="relative z-10 flex h-13 shrink-0 items-center gap-3 border-b border-edge bg-panel px-4">
+        <button type="button" className="rounded-md px-2 py-1 text-xs text-soft hover:bg-hover hover:text-main" onClick={onBack}>← 返回文件列表</button>
+        <span className="flex items-center gap-2 text-sm font-medium"><AudioIcon className="text-sky-400" /> MP3 播放器</span>
+        <div className="flex-1" />
+        <span className="hidden text-xs text-dim sm:inline">共 {mp3Files.length} 首</span>
+        <button type="button" title="关闭播放器" aria-label="关闭播放器" className="rounded-md p-1.5 text-soft hover:bg-hover hover:text-main" onClick={onBack}><CloseIcon /></button>
+      </div>
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col lg:flex-row">
+        <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-edge bg-panel lg:w-72 lg:border-b-0 lg:border-r xl:w-80">
+          <div className="flex items-center gap-2 border-b border-edge px-3 py-2.5">
+            <span className="text-xs font-medium text-soft">音乐列表</span>
+            <span className="rounded-full bg-panel2 px-2 py-0.5 text-[10px] tabular-nums text-dim">{mp3Files.length}</span>
+          </div>
+          <div className="border-b border-edge p-2">
+            <div className="flex items-center gap-2 rounded-md border border-edge2 bg-panel2 px-2.5 py-1.5">
+              <SearchIcon className="shrink-0 text-mid" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索歌曲或导入人"
+                className="min-w-0 flex-1 bg-transparent text-xs text-main outline-none placeholder:text-dim"
+              />
+              {query && <button type="button" title="清空搜索" className="text-dim hover:text-main" onClick={() => setQuery('')}><CloseIcon /></button>}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} aria-label="排序方式" className="min-w-0 flex-1 rounded border border-edge2 bg-panel2 px-2 py-1 text-[11px] text-soft">
+                <option value="default">默认顺序</option>
+                <option value="title">按标题</option>
+                <option value="importer">按导入人</option>
+              </select>
+              <select value={mode} onChange={(event) => setMode(event.target.value as PlaybackMode)} aria-label="播放模式" className="min-w-0 flex-1 rounded border border-edge2 bg-panel2 px-2 py-1 text-[11px] text-soft">
+                <option value="sequential">顺序播放</option>
+                <option value="loop">列表循环</option>
+                <option value="single">单曲循环</option>
+                <option value="random">随机播放</option>
+              </select>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            {visibleFiles.length > 0 ? visibleFiles.map((file) => {
+              const isActive = file.assetId === current.assetId
+              return (
+                <button
+                  key={file.assetId}
+                  type="button"
+                  className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${isActive ? 'bg-sky-500/15' : 'hover:bg-hover'}`}
+                  onClick={() => selectTrack(file)}
+                >
+                  <span className="flex w-5 shrink-0 justify-center">
+                    {isActive && playing ? (
+                      <span className="sq-eq"><span /><span /><span /></span>
+                    ) : (
+                      <span className="text-[11px] tabular-nums text-dim">{orderedFiles.indexOf(file) + 1}</span>
+                    )}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={`block truncate text-xs ${isActive ? 'font-medium text-sky-400' : 'text-main'}`} title={file.name}>{file.name}</span>
+                    <span className="block truncate text-[10px] text-dim">{file.nodes[0]?.data.createdByName ?? '未知'}</span>
+                  </span>
+                  {isActive && <AudioIcon className="h-3.5 w-3.5 shrink-0 text-sky-400" />}
+                </button>
+              )
+            }) : (
+              <div className="flex h-full min-h-32 items-center justify-center text-xs text-dim">没有匹配的歌曲</div>
+            )}
+          </div>
+        </aside>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+          <section className="flex shrink-0 flex-col items-center justify-center gap-6 border-b border-edge p-6 lg:w-[42%] lg:border-b-0 lg:border-r xl:w-[44%]">
+            <div className="relative">
+              <div className="absolute -inset-8 rounded-full opacity-40 blur-2xl" style={{ background: `radial-gradient(circle, hsl(${hue} 75% 60%) 0%, transparent 70%)` }} />
+              <div className={`sq-disc relative aspect-square w-40 rounded-full sm:w-52 ${playing ? '' : 'sq-disc-paused'}`}>
+                <div className="absolute inset-0 rounded-full border border-edge2" style={{ background: 'repeating-radial-gradient(circle, var(--panel2) 0 2px, var(--panel) 2px 4px)' }} />
+                <div className="absolute inset-[20%] rounded-full border border-edge2" style={{ background: 'repeating-radial-gradient(circle, var(--panel2) 0 1.5px, var(--panel) 1.5px 3px)' }} />
+                <div className="absolute inset-0 m-auto flex h-14 w-14 items-center justify-center rounded-full border border-edge2 bg-panel2 shadow-xl sm:h-16 sm:w-16">
+                  <AudioIcon className="h-6 w-6 sm:h-7 sm:w-7" style={{ color: `hsl(${hue} 75% 60%)` }} />
+                </div>
+              </div>
+            </div>
+            <div className="w-full max-w-sm text-center">
+              <div className="flex items-center justify-center gap-2">
+                <h2 className="min-w-0 truncate text-base font-semibold" title={current.name}>{current.name}</h2>
+                <button
+                  type="button"
+                  title="下载当前歌曲"
+                  className="shrink-0 rounded p-1.5 text-soft hover:bg-hover hover:text-main"
+                  onClick={() => void downloadCurrent()}
+                >
+                  <DownloadIcon />
+                </button>
+              </div>
+              <p className="mt-1 truncate text-xs text-dim">
+                {lyrics?.meta.ar || lyrics?.meta.artist ? `${lyrics.meta.ar ?? lyrics.meta.artist} · ` : ''}
+                导入人：{current.nodes[0]?.data.createdByName ?? '未知'}
+              </p>
+            </div>
+            <div className="flex w-full max-w-sm items-center gap-3">
+              <span className="w-10 shrink-0 text-right text-[11px] tabular-nums text-dim">{formatTime(currentTime)}</span>
+              <input
+                aria-label="播放进度"
+                type="range"
+                min={0}
+                max={duration || 0}
+                step={0.1}
+                value={Math.min(currentTime, duration || 0)}
+                onChange={(event) => seekProgress(Number(event.target.value))}
+                className="sq-range min-w-0 flex-1"
+                style={{ '--sq-fill': `${progress}%` } as CSSProperties}
+              />
+              <span className="w-10 shrink-0 text-[11px] tabular-nums text-dim">{formatTime(duration)}</span>
+            </div>
+            <div className="flex w-full max-w-sm items-center justify-between">
+              <div className="flex w-24 items-center">
+                <button type="button" className="rounded-full p-2 text-soft hover:bg-hover hover:text-main" title={MODE_LABELS[mode]} onClick={cycleMode}>
+                  <ModeGlyph mode={mode} />
+                </button>
+                <span className="ml-1 hidden text-[10px] text-faint xl:inline">{MODE_LABELS[mode]}</span>
+              </div>
+              <div className="flex items-center gap-4">
+                <button type="button" className="rounded-full p-2.5 text-soft hover:bg-hover hover:text-main disabled:opacity-30" title="上一首" onClick={prevTrack} disabled={orderedFiles.length < 2}><PrevIcon /></button>
+                <button type="button" className="flex h-14 w-14 items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/25 transition-colors hover:bg-sky-400 disabled:opacity-40" onClick={toggle} disabled={!url}>
+                  {playing ? <PauseIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6 translate-x-px" />}
+                </button>
+                <button type="button" className="rounded-full p-2.5 text-soft hover:bg-hover hover:text-main disabled:opacity-30" title="下一首" onClick={() => { autoplayRef.current = true; nextTrack(true) }} disabled={orderedFiles.length < 2}><NextIcon /></button>
+              </div>
+              <div className="flex w-28 items-center justify-end gap-1.5">
+                <button type="button" className="rounded p-1.5 text-soft hover:bg-hover hover:text-main" title={muted ? '取消静音' : '静音'} onClick={() => usePlayerStore.getState().setMuted(!muted)}>
+                  {muted || volume === 0 ? <MuteIcon /> : <VolumeIcon />}
+                </button>
+                <input aria-label="音量" type="range" min={0} max={1} step={0.05} value={volume} onChange={(event) => applyVolume(Number(event.target.value))} className="sq-range w-16 sm:w-20" />
+              </div>
+            </div>
+          </section>
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="flex h-11 shrink-0 items-center gap-2 border-b border-edge px-4">
+              <span className="text-xs font-medium text-soft">歌词</span>
+              {lyricsSource && <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-400">{lyricsSource}</span>}
+              <div className="flex-1" />
+              {lyrics?.kind === 'synced' && (
+                <div className="flex items-center gap-1">
+                  <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums text-soft hover:bg-hover" title="歌词提前 0.5 秒" onClick={() => setLyricOffset((value) => value - 0.5)}>-0.5s</button>
+                  {lyricOffset !== 0 && <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums text-sky-400 hover:bg-hover" title="重置歌词偏移" onClick={() => setLyricOffset(0)}>{lyricOffset > 0 ? '+' : ''}{lyricOffset.toFixed(1)}s</button>}
+                  <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums text-soft hover:bg-hover" title="歌词延后 0.5 秒" onClick={() => setLyricOffset((value) => value + 0.5)}>+0.5s</button>
+                </div>
+              )}
+            </div>
+            <div
+              ref={scrollRef}
+              onWheel={() => { freezeUntilRef.current = Date.now() + 3000 }}
+              onTouchMove={() => { freezeUntilRef.current = Date.now() + 3000 }}
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4"
+            >
+              {lyricsState === 'loading' && <div className="flex h-full items-center justify-center text-xs text-dim">歌词加载中…</div>}
+              {lyricsState === 'ready' && lyrics?.kind === 'synced' && lyrics.lines.map((line, lineIndex) => (
+                <button
+                  key={lineIndex}
+                  ref={(el) => { if (el) lineRefs.current.set(lineIndex, el); else lineRefs.current.delete(lineIndex) }}
+                  type="button"
+                  onClick={() => seekTo(line.time)}
+                  title="点击跳转到该句"
+                  className={`block w-full rounded-md px-3 py-1.5 text-center transition-all duration-300 ${lineIndex === activeIndex ? 'text-base font-semibold text-sky-400' : 'text-sm text-soft/70 hover:text-soft'}`}
+                >
+                  {line.text || '\u00A0'}
+                </button>
+              ))}
+              {lyricsState === 'ready' && lyrics?.kind === 'unsynced' && (
+                <div className="space-y-2 px-3 py-2 text-center text-xs leading-6 text-soft/80">
+                  {lyrics.lines.map((line, lineIndex) => <p key={lineIndex} className="whitespace-pre-wrap">{line.text || '\u00A0'}</p>)}
+                  <p className="pt-3 text-[10px] text-faint">该歌曲只有未同步歌词，无法跟随播放滚动</p>
+                </div>
+              )}
+              {lyricsState === 'none' && (
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+                  <AudioIcon className="h-8 w-8 text-faint" />
+                  <p className="text-xs text-dim">暂无歌词</p>
+                  <p className="max-w-64 text-[11px] leading-relaxed text-faint">导入 .lrc 文件并在画布上连线指向该歌曲即可作为歌词；内嵌歌词（ID3）的 MP3 自动识别</p>
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  )
 }
 
 const TYPE_GROUPS: TypeGroup[] = [
@@ -109,6 +677,7 @@ export function FileManagerModal() {
   const [expandedGroups, setExpandedGroups] = useState(() => new Set(TYPE_GROUPS.map((group) => group.id)))
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
+  const [playerAssetId, setPlayerAssetId] = useState<string | null>(null)
 
   const assetIds = useMemo(
     () => [...new Set(nodes.map((node) => node.data.assetId).filter((id): id is string => Boolean(id)))],
@@ -156,6 +725,9 @@ export function FileManagerModal() {
   }, [files])
 
   if (!open) return null
+  if (playerAssetId) {
+    return <AudioPlayerView files={files} initialAssetId={playerAssetId} onBack={() => setPlayerAssetId(null)} />
+  }
 
   const openFile = async (file: ManagedFile) => {
     const ui = useUiStore.getState()
@@ -164,7 +736,9 @@ export function FileManagerModal() {
       toast('该 Markdown 正在被其他人操作，暂时无法打开', 'error')
       return
     }
-    if (file.kind === 'image') {
+    if (isMp3(file)) {
+      setPlayerAssetId(file.assetId)
+    } else if (file.kind === 'image') {
       setOpen(false)
       ui.openImageViewer(file.assetId, file.name)
     } else if (file.kind === 'psd') {
@@ -383,7 +957,7 @@ export function FileManagerModal() {
                   })}
                   aria-label={`选择 ${file.name}`}
                 />
-                <button type="button" className="flex min-w-0 items-center gap-2 text-left" onDoubleClick={() => void openFile(file)} onClick={() => setSelectedIds(new Set([file.assetId]))}>
+                <button type="button" className="flex min-w-0 items-center gap-2 text-left" onDoubleClick={() => void openFile(file)} onClick={() => { if (isMp3(file)) void openFile(file); else setSelectedIds(new Set([file.assetId])) }}>
                   <span className="shrink-0 text-mid"><KindIcon kind={file.kind} /></span>
                   <span className="min-w-0">
                     <span className="block truncate text-xs text-main" title={file.name}>{file.name}</span>
