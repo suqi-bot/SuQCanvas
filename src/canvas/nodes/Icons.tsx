@@ -243,6 +243,20 @@ export function RepeatOneIcon(props: IconProps) {
   )
 }
 
+export function FlowIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="5" cy="6" r="2" />
+      <circle cx="5" cy="18" r="2" />
+      <circle cx="19" cy="12" r="2" />
+      <path d="M7 6h9" />
+      <path d="M7 18h7" />
+      <path d="M5 8v8" />
+      <path d="M14 12h3" />
+    </Base>
+  )
+}
+
 export function ChevronLeftIcon(props: IconProps) {
   return (
     <Base {...props}>

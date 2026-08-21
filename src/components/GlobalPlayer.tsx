@@ -91,7 +91,7 @@ export function GlobalPlayer() {
   const onOpenPlayer = () => {
     const player = usePlayerStore.getState()
     const assetId = player.source === 'external' ? player.external?.assetId : player.track?.assetId
-    if (assetId) useUiStore.getState().openMusicPlayer(assetId)
+    if (assetId) useUiStore.getState().openMusicPlayer(assetId, source === 'external')
   }
   const onToggle = () => {
     if (usingExternal) {

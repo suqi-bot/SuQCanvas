@@ -3,6 +3,7 @@ import {
   AudioIcon,
   CloseIcon,
   DownloadIcon,
+  FlowIcon,
   KindIcon,
   MuteIcon,
   NextIcon,
@@ -46,19 +47,42 @@ interface TypeGroup {
   kinds: MediaKind[]
 }
 
-type PlaybackMode = 'sequential' | 'random' | 'loop' | 'single'
+type PlaybackMode = 'sequential' | 'random' | 'loop' | 'single' | 'flow'
+
+const LYRIC_OFFSET_KEY = 'suqcanvas:lyricOffsets'
+
+function loadLyricOffset(assetId: string): number {
+  try {
+    const map = JSON.parse(localStorage.getItem(LYRIC_OFFSET_KEY) ?? '{}') as Record<string, number>
+    return map[assetId] ?? 0
+  } catch {
+    return 0
+  }
+}
+
+function saveLyricOffset(assetId: string, offset: number): void {
+  try {
+    const map = JSON.parse(localStorage.getItem(LYRIC_OFFSET_KEY) ?? '{}') as Record<string, number>
+    if (offset === 0) delete map[assetId]
+    else map[assetId] = offset
+    localStorage.setItem(LYRIC_OFFSET_KEY, JSON.stringify(map))
+  } catch {
+    // ignore
+  }
+}
 
 function isMp3(file: ManagedFile): boolean {
   return file.kind === 'audio' && (file.mime.toLowerCase() === 'audio/mpeg' || /\.mp3$/i.test(file.name))
 }
 
-const MODE_ORDER: PlaybackMode[] = ['sequential', 'loop', 'single', 'random']
+const MODE_ORDER: PlaybackMode[] = ['sequential', 'loop', 'single', 'random', 'flow']
 
 const MODE_LABELS: Record<PlaybackMode, string> = {
   sequential: '顺序播放',
   random: '随机播放',
   loop: '列表循环',
   single: '单曲循环',
+  flow: '流式播放',
 }
 
 function formatTime(seconds: number): string {
@@ -74,27 +98,65 @@ function nameHue(name: string): number {
   return hash
 }
 
+// 沿画布连线（音频节点之间的边）从起点开始广度优先收集可流式播放的歌曲顺序
+function buildFlowOrder(startAssetId: string): string[] {
+  const { nodes, edges } = useCanvasStore.getState()
+  const nodeIdsByAsset = new Map<string, string[]>()
+  for (const node of nodes) {
+    if (!node.data.assetId) continue
+    const list = nodeIdsByAsset.get(node.data.assetId) ?? []
+    list.push(node.id)
+    nodeIdsByAsset.set(node.data.assetId, list)
+  }
+  const nodeById = new Map(nodes.map((node) => [node.id, node]))
+  const order: string[] = [startAssetId]
+  const visited = new Set<string>([startAssetId])
+  const queue = [...(nodeIdsByAsset.get(startAssetId) ?? [])]
+  while (queue.length > 0) {
+    const nodeId = queue.shift()!
+    for (const edge of edges) {
+      if (edge.source !== nodeId) continue
+      const target = nodeById.get(edge.target)
+      if (!target?.data.assetId || target.data.kind !== 'audio') continue
+      const assetId = target.data.assetId
+      if (visited.has(assetId)) continue
+      visited.add(assetId)
+      order.push(assetId)
+      queue.push(...(nodeIdsByAsset.get(assetId) ?? []))
+    }
+  }
+  return order
+}
+
 function ModeGlyph({ mode }: { mode: PlaybackMode }) {
   if (mode === 'random') return <ShuffleIcon />
   if (mode === 'single') return <RepeatOneIcon />
   if (mode === 'loop') return <RepeatIcon />
+  if (mode === 'flow') return <FlowIcon />
   return <SequentialIcon />
 }
 
 function AudioPlayerView({
   files,
   initialAssetId,
+  initialFlow,
   onBack,
   onClose,
 }: {
   files: ManagedFile[]
   initialAssetId: string
+  initialFlow: boolean
   onBack: () => void
   onClose: () => void
 }) {
   const mp3Files = useMemo(() => files.filter(isMp3), [files])
   const [sort, setSort] = useState<'default' | 'title' | 'importer'>('default')
-  const [mode, setMode] = useState<PlaybackMode>('sequential')
+  const [mode, setMode] = useState<PlaybackMode>(initialFlow ? 'flow' : 'sequential')
+  const [flowOrder, setFlowOrder] = useState<string[]>([])
+  const flowOrderRef = useRef<string[]>([])
+  const modeRef = useRef<PlaybackMode>(mode)
+  modeRef.current = mode
+  flowOrderRef.current = flowOrder
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(() => Math.max(0, mp3Files.findIndex((file) => file.assetId === initialAssetId)))
   const [lyrics, setLyrics] = useState<LyricsData | null>(null)
@@ -136,7 +198,18 @@ function AudioPlayerView({
   const totalOffset = (lyrics?.offsetMs ?? 0) / 1000 + lyricOffset
   const progress = duration > 0 ? (Math.min(currentTime, duration) / duration) * 100 : 0
 
+  const flowNext = (): boolean => {
+    const order = flowOrderRef.current
+    const pos = order.indexOf(current.assetId)
+    const nextId = pos >= 0 && pos < order.length - 1 ? order[pos + 1] : undefined
+    if (!nextId) return false
+    const fileIndex = orderedFiles.findIndex((file) => file.assetId === nextId)
+    if (fileIndex < 0) return false
+    setIndex(fileIndex)
+    return true
+  }
   const nextTrack = (wrap: boolean): boolean => {
+    if (mode === 'flow') return flowNext()
     if (orderedFiles.length < 2) return false
     if (mode === 'random') {
       let next = index
@@ -156,6 +229,14 @@ function AudioPlayerView({
   }
   const prevTrack = () => {
     autoplayRef.current = true
+    if (mode === 'flow') {
+      const order = flowOrderRef.current
+      const pos = order.indexOf(current.assetId)
+      const prevId = pos > 0 ? order[pos - 1] : order[order.length - 1]
+      const fileIndex = orderedFiles.findIndex((file) => file.assetId === prevId)
+      if (fileIndex >= 0 && fileIndex !== index) setIndex(fileIndex)
+      return
+    }
     setIndex(index > 0 ? index - 1 : orderedFiles.length - 1)
   }
   const toggle = () => usePlayerStore.getState().toggle()
@@ -239,8 +320,32 @@ function AudioPlayerView({
     return () => setPlayerEndedHandler(null)
   })
 
+  const updateLyricOffset = (change: (prev: number) => number) => {
+    setLyricOffset((prev) => {
+      const next = change(prev)
+      if (current?.assetId) saveLyricOffset(current.assetId, next)
+      return next
+    })
+  }
+
   useEffect(() => {
-    setLyricOffset(0)
+    setLyricOffset(loadLyricOffset(current?.assetId ?? ''))
+  }, [current?.assetId])
+
+  useEffect(() => {
+    if (mode === 'flow') {
+      setFlowOrder(buildFlowOrder(current?.assetId ?? ''))
+    } else {
+      setFlowOrder([])
+    }
+    // 仅在进入/离开流式模式时重建顺序；切歌时由下面的 current 变化重建
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
+
+  useEffect(() => {
+    if (modeRef.current === 'flow') {
+      setFlowOrder(buildFlowOrder(current?.assetId ?? ''))
+    }
   }, [current?.assetId])
 
   useEffect(() => {
@@ -451,12 +556,14 @@ function AudioPlayerView({
                 <option value="loop">列表循环</option>
                 <option value="single">单曲循环</option>
                 <option value="random">随机播放</option>
+                <option value="flow">流式播放</option>
               </select>
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto py-2 pr-2">
             {visibleFiles.length > 0 ? visibleFiles.map((file) => {
               const isActive = file.assetId === current.assetId
+              const flowPos = mode === 'flow' ? flowOrder.indexOf(file.assetId) : -1
               return (
                 <button
                   key={file.assetId}
@@ -467,6 +574,10 @@ function AudioPlayerView({
                   <span className="flex w-5 shrink-0 justify-center">
                     {isActive && playing ? (
                       <span className="sq-eq"><span /><span /><span /></span>
+                    ) : mode === 'flow' ? (
+                      flowPos >= 0
+                        ? <span className="text-[11px] tabular-nums text-sky-400/80">{flowPos + 1}</span>
+                        : <span className="text-[11px] text-faint">–</span>
                     ) : (
                       <span className="text-[11px] tabular-nums text-dim">{orderedFiles.indexOf(file) + 1}</span>
                     )}
@@ -529,7 +640,12 @@ function AudioPlayerView({
             </div>
             <div className="flex w-full max-w-sm items-center justify-between">
               <div className="flex w-24 items-center">
-                <button type="button" className="rounded-full p-2 text-soft hover:bg-hover hover:text-main" title={MODE_LABELS[mode]} onClick={cycleMode}>
+                <button
+                  type="button"
+                  className="rounded-full p-2 text-soft hover:bg-hover hover:text-main"
+                  title={mode === 'flow' && flowOrder.length <= 1 ? `${MODE_LABELS[mode]}（该歌曲未连线其他音频）` : MODE_LABELS[mode]}
+                  onClick={cycleMode}
+                >
                   <ModeGlyph mode={mode} />
                 </button>
                 <span className="ml-1 hidden text-[10px] text-faint xl:inline">{MODE_LABELS[mode]}</span>
@@ -556,9 +672,9 @@ function AudioPlayerView({
               <div className="flex-1" />
               {lyrics?.kind === 'synced' && (
                 <div className="flex items-center gap-1">
-                  <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums text-soft hover:bg-hover" title="歌词提前 0.5 秒" onClick={() => setLyricOffset((value) => value - 0.5)}>-0.5s</button>
-                  {lyricOffset !== 0 && <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums text-sky-400 hover:bg-hover" title="重置歌词偏移" onClick={() => setLyricOffset(0)}>{lyricOffset > 0 ? '+' : ''}{lyricOffset.toFixed(1)}s</button>}
-                  <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums text-soft hover:bg-hover" title="歌词延后 0.5 秒" onClick={() => setLyricOffset((value) => value + 0.5)}>+0.5s</button>
+                  <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums text-soft hover:bg-hover" title="歌词提前 0.5 秒" onClick={() => updateLyricOffset((value) => value - 0.5)}>-0.5s</button>
+                  {lyricOffset !== 0 && <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums text-sky-400 hover:bg-hover" title="重置歌词偏移" onClick={() => updateLyricOffset(() => 0)}>{lyricOffset > 0 ? '+' : ''}{lyricOffset.toFixed(1)}s</button>}
+                  <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums text-soft hover:bg-hover" title="歌词延后 0.5 秒" onClick={() => updateLyricOffset((value) => value + 0.5)}>+0.5s</button>
                 </div>
               )}
             </div>
@@ -680,11 +796,13 @@ export function FileManagerModal() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [playerAssetId, setPlayerAssetId] = useState<string | null>(null)
+  const [playerFlow, setPlayerFlow] = useState(false)
   const playerTarget = useUiStore((state) => state.playerTarget)
 
   useEffect(() => {
     if (playerTarget) {
-      setPlayerAssetId(playerTarget)
+      setPlayerAssetId(playerTarget.assetId)
+      setPlayerFlow(playerTarget.flow)
       useUiStore.setState({ playerTarget: null })
     }
   }, [playerTarget])
@@ -740,6 +858,7 @@ export function FileManagerModal() {
       <AudioPlayerView
         files={files}
         initialAssetId={playerAssetId}
+        initialFlow={playerFlow}
         onBack={() => setPlayerAssetId(null)}
         onClose={() => setOpen(false)}
       />
@@ -755,6 +874,7 @@ export function FileManagerModal() {
     }
     if (isMp3(file)) {
       setPlayerAssetId(file.assetId)
+      setPlayerFlow(false)
     } else if (file.kind === 'image') {
       setOpen(false)
       ui.openImageViewer(file.assetId, file.name)
