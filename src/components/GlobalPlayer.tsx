@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEven
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, ForwardIcon, PauseIcon, PlayIcon, RewindIcon } from '../canvas/nodes/Icons'
 import { registerAudio } from '../media/mediaCoordinator'
 import { findPlaylistByAsset, resolvePlaylistsCached } from '../media/playlists'
-import { bindPlayerAudio, notifyPlayerEnded, selectNowDuration, selectNowPlaying, selectNowTime, usePlayerStore } from '../store/playerStore'
+import { bindPlayerAudio, notifyEngineEnded, usePlayerStore } from '../store/playerStore'
 import { useCanvasStore } from '../store/canvasStore'
 import { useUiStore } from '../store/uiStore'
 
@@ -13,16 +13,13 @@ function fmtTime(seconds: number): string {
   return `${minutes}:${String(secs).padStart(2, '0')}`
 }
 
-// 常驻的全局音频元素 + 播放中的右上角悬浮迷你控制栏。
-// 支持两种来源：MP3 播放器（track，关闭播放器后继续接管）和画布音频节点（external）。
-// 关闭悬浮栏才会停止并隐藏。
+// 常驻的全局音频元素（唯一播放引擎）+ 播放中的右上角悬浮迷你控制栏。
+// 画布音乐节点与播放器共用这一个元素与同一份播放状态。
 export function GlobalPlayer() {
-  const source = usePlayerStore((s) => s.source)
   const track = usePlayerStore((s) => s.track)
-  const external = usePlayerStore((s) => s.external)
-  const playing = usePlayerStore(selectNowPlaying)
-  const currentTime = usePlayerStore(selectNowTime)
-  const duration = usePlayerStore(selectNowDuration)
+  const playing = usePlayerStore((s) => s.playing)
+  const currentTime = usePlayerStore((s) => s.time)
+  const duration = usePlayerStore((s) => s.duration)
   const volume = usePlayerStore((s) => s.volume)
   const muted = usePlayerStore((s) => s.muted)
   const barVisible = usePlayerStore((s) => s.barVisible)
@@ -84,10 +81,9 @@ export function GlobalPlayer() {
     el.muted = muted
   }, [volume, muted])
 
-  const usingExternal = source === 'external' && external !== null
-  const shown = barVisible && (track !== null || external !== null)
+  const shown = barVisible && track !== null
+  const name = track?.name ?? ''
 
-  const name = usingExternal ? external!.name : (track?.name ?? '')
   // 当前播放的歌曲所属的画布歌单名(多个歌单包含同一首歌时取第一个)
   const canvasNodes = useCanvasStore((s) => s.nodes)
   const canvasEdges = useCanvasStore((s) => s.edges)
@@ -95,34 +91,23 @@ export function GlobalPlayer() {
     () => resolvePlaylistsCached(canvasNodes, canvasEdges),
     [canvasNodes, canvasEdges],
   )
-  const activeAssetId = usingExternal ? external?.assetId : track?.assetId
+  const activeAssetId = track?.assetId
   const playlistName = useMemo(
     () => findPlaylistByAsset(playlists, activeAssetId)?.name,
     [playlists, activeAssetId],
   )
   const onOpenPlayer = () => {
     const player = usePlayerStore.getState()
-    const assetId = player.source === 'external' ? player.external?.assetId : player.track?.assetId
-    if (assetId) useUiStore.getState().openMusicPlayer(assetId, source === 'external')
+    if (player.track?.assetId) {
+      // 来自画布节点（带 nodeId）的曲目按流式模式打开，连播顺序沿用画布连线
+      useUiStore.getState().openMusicPlayer(player.track.assetId, Boolean(player.track.nodeId))
+    }
   }
   const onToggle = () => {
-    if (usingExternal) {
-      const el = external!.element
-      if (el.paused) void el.play().catch(() => undefined)
-      else el.pause()
-    } else {
-      usePlayerStore.getState().toggle()
-    }
+    usePlayerStore.getState().toggle()
   }
   const onSeek = (delta: number) => {
-    if (usingExternal) {
-      const el = external!.element
-      const max = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : el.currentTime + delta
-      el.currentTime = Math.max(0, Math.min(el.currentTime + delta, max))
-      usePlayerStore.setState({ currentTime: el.currentTime })
-    } else {
-      usePlayerStore.getState().seekBy(delta)
-    }
+    usePlayerStore.getState().seekBy(delta)
   }
   const onClose = () => {
     // 仅隐藏悬浮栏，音乐继续播放，通过工具栏 CD 图标重新打开播放器
@@ -137,22 +122,19 @@ export function GlobalPlayer() {
         preload="metadata"
         onPlay={(event) =>
           usePlayerStore.setState((s) => ({
-            trackPlaying: true,
-            // 全局元素一旦真正开始播放，接管来源即切换为播放器，避免与画布节点状态错位
-            source: 'track',
-            trackTime: event.currentTarget.currentTime,
-            currentTime: event.currentTarget.currentTime,
+            playing: true,
+            time: event.currentTarget.currentTime,
             duration:
               Number.isFinite(event.currentTarget.duration) && event.currentTarget.duration > 0
                 ? event.currentTarget.duration
                 : s.duration,
           }))
         }
-        onPause={() => usePlayerStore.setState({ trackPlaying: false })}
-        onTimeUpdate={(event) => usePlayerStore.setState({ trackTime: event.currentTarget.currentTime, currentTime: event.currentTarget.currentTime })}
-        onLoadedMetadata={(event) => usePlayerStore.setState({ trackDuration: event.currentTarget.duration, duration: event.currentTarget.duration })}
-        onDurationChange={(event) => usePlayerStore.setState({ trackDuration: event.currentTarget.duration, duration: event.currentTarget.duration })}
-        onEnded={() => notifyPlayerEnded()}
+        onPause={() => usePlayerStore.setState({ playing: false })}
+        onTimeUpdate={(event) => usePlayerStore.setState({ time: event.currentTarget.currentTime })}
+        onLoadedMetadata={(event) => usePlayerStore.setState({ duration: event.currentTarget.duration })}
+        onDurationChange={(event) => usePlayerStore.setState({ duration: event.currentTarget.duration })}
+        onEnded={() => notifyEngineEnded()}
       />
       {shown && (
         <div

@@ -41,6 +41,7 @@ export async function exportProjectToBlob(
   const assetIds = new Set<string>()
   for (const n of nodes) {
     if (n.data?.assetId) assetIds.add(n.data.assetId)
+    if (n.data?.coverAssetId) assetIds.add(n.data.coverAssetId)
   }
 
   const files: Record<string, Uint8Array> = {}

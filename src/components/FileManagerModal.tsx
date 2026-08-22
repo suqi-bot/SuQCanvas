@@ -109,6 +109,17 @@ export function FileManagerModal() {
     }
   }, [playerTarget])
 
+  // 关闭文件管理器时清空播放器入口状态：组件不卸载但渲染 null，
+  // 若不清理，下次从悬浮窗/歌单徽标重新进入时会先以残留的旧歌曲挂载，
+  // 导致播放器跳回上一首歌且引擎被切歌暂停
+  useEffect(() => {
+    if (!open) {
+      setPlayerAssetId(null)
+      setPlayerFlow(false)
+      setPlayerPlaylistId(null)
+    }
+  }, [open])
+
   const assetIds = useMemo(
     () => [...new Set(nodes.map((node) => node.data.assetId).filter((id): id is string => Boolean(id)))],
     [nodes],

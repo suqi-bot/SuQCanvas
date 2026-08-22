@@ -1,8 +1,11 @@
+import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useReactFlow } from '@xyflow/react'
 import { useCanvasStore, type LayerMode } from '../store/canvasStore'
 import { useLanStore } from '../store/lanStore'
 import { db } from '../db/db'
 import { getAssetUrl } from '../media/blobRegistry'
+import { putAsset } from '../io/fileLoader'
+import { useAssetSourceUrl } from '../media/useAssetUrl'
 import { toast } from '../store/uiStore'
 import type {
   ArrowPos,
@@ -13,6 +16,7 @@ import type {
   ShapeType,
   StickyColor,
   SuqEdge,
+  SuqNode,
   TextAlign,
   TextAlignV,
 } from '../types'
@@ -127,6 +131,128 @@ const FONT_OPTIONS = [
   { value: '"Courier New", monospace', label: 'Courier New' },
   { value: 'monospace', label: '等宽字体' },
 ]
+
+/** 专辑图缩略图：优先缩略图，缺失时回退原图 */
+function CoverThumb({ assetId, className }: { assetId: string; className?: string }) {
+  const thumbUrl = useAssetSourceUrl(assetId, 'thumbnail')
+  const fullUrl = useAssetSourceUrl(assetId, thumbUrl ? undefined : 'asset')
+  const src = thumbUrl ?? fullUrl
+  if (!src) return <div className={`${className ?? ''} animate-pulse bg-hover/60`} />
+  return <img src={src} alt="" draggable={false} className={className} />
+}
+
+function AlbumArtSection({
+  node,
+  update,
+}: {
+  node: SuqNode
+  update: (patch: Partial<SuqNode['data']>) => void
+}) {
+  const nodes = useCanvasStore((s) => s.nodes)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const coverAssetId = node.data.coverAssetId
+
+  // 本项目画布上正在使用的图片素材（去重）
+  const projectImages = useMemo(() => {
+    const seen = new Set<string>()
+    const ids: string[] = []
+    for (const n of nodes) {
+      if (n.data.kind !== 'image' || !n.data.assetId || seen.has(n.data.assetId)) continue
+      seen.add(n.data.assetId)
+      ids.push(n.data.assetId)
+    }
+    return ids
+  }, [nodes])
+
+  const onLocalFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    try {
+      const meta = await putAsset(file)
+      update({ coverAssetId: meta.id })
+      toast('专辑图已设置', 'success')
+    } catch {
+      toast('专辑图导入失败', 'error')
+    }
+  }
+
+  return (
+    <Section title="传入专辑图">
+      {coverAssetId ? (
+        <div className="mb-2 flex items-center gap-2">
+          <CoverThumb
+            assetId={coverAssetId}
+            className="h-14 w-14 shrink-0 rounded-md border border-edge2 object-cover"
+          />
+          <button
+            type="button"
+            onClick={() => update({ coverAssetId: undefined })}
+            className="rounded-md border border-edge2 px-2 py-1 text-xs text-soft hover:bg-hover"
+          >
+            移除
+          </button>
+        </div>
+      ) : (
+        <p className="mb-2 text-[10px] leading-relaxed text-dim">
+          为音乐节点设置专辑图，展示在节点背景与播放器中
+        </p>
+      )}
+      <div className="flex flex-col gap-1.5">
+        <button
+          type="button"
+          onClick={() => setPickerOpen((value) => !value)}
+          className="rounded-md border border-edge2 px-2 py-1.5 text-xs text-soft hover:bg-hover"
+        >
+          {pickerOpen ? '收起项目图片' : '从项目选择'}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(event) => void onLocalFile(event)}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="rounded-md border border-edge2 px-2 py-1.5 text-xs text-soft hover:bg-hover"
+        >
+          从本地上传
+        </button>
+        {pickerOpen && (
+          <div className="max-h-40 overflow-y-auto">
+            {projectImages.length > 0 ? (
+              <div className="grid grid-cols-4 gap-1.5">
+                {projectImages.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    title="设为专辑图"
+                    onClick={() => {
+                      update({ coverAssetId: id })
+                      setPickerOpen(false)
+                    }}
+                    className={`aspect-square overflow-hidden rounded-md border ${
+                      id === coverAssetId ? 'border-sky-500 ring-1 ring-sky-400' : 'border-edge2'
+                    }`}
+                  >
+                    <CoverThumb assetId={id} className="h-full w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[10px] leading-relaxed text-dim">
+                画布中暂无图片元素，可先从本地上传
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </Section>
+  )
+}
 
 function ColorField({
   value,
@@ -376,6 +502,13 @@ export function InspectorPanel() {
                 {firstNode.data.createdByName ?? '历史元素（未记录）'}
               </div>
             </Section>
+          )}
+          {selectedEditableNodes.length === 1 && firstNode.data.kind === 'audio' && (
+            <AlbumArtSection
+              key={firstNode.id}
+              node={firstNode}
+              update={(patch) => updateNodeData(firstNode.id, patch)}
+            />
           )}
           {selectedEditableNodes.length === 1 &&
             (firstNode.data.kind === 'text' ||

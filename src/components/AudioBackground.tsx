@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { getAnalyser, wireAudioElement } from '../media/audioAnalyzer'
-import { getPlayerAudioElement, usePlayerStore } from '../store/playerStore'
+import { getPlayerAudioElement } from '../store/playerStore'
 
 const BAR_COUNT = 64
 
@@ -153,12 +153,10 @@ export function AudioBackground({
     }
   }, [coverUrl])
 
-  // 把正在播放的音频元素接入分析器（全局元素 + 可能的画布节点元素）
+  // 把正在播放的音频元素接入分析器（全局唯一播放元素）
   useEffect(() => {
     const global = getPlayerAudioElement()
     wireAudioElement(global)
-    const external = usePlayerStore.getState().external?.element
-    if (external && external !== global) wireAudioElement(external)
   }, [])
 
   useEffect(() => {

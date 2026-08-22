@@ -48,6 +48,7 @@ export async function gcAssets(): Promise<void> {
   for (const p of projects) {
     for (const n of p.graph.nodes) {
       if (n.data?.assetId) referenced.add(n.data.assetId)
+      if (n.data?.coverAssetId) referenced.add(n.data.coverAssetId)
     }
   }
   const assets = await db.assets.toArray()

@@ -24,16 +24,13 @@ import { db } from '../db/db'
 import { getAssetUrl, getThumbnailUrl } from '../media/blobRegistry'
 import { loadLyricsFor, type LyricsData } from '../media/lyrics'
 import { findPlaylistByAsset, linearizeFrom, resolvePlaylistsCached, type Playlist } from '../media/playlists'
-import { useAssetUrl } from '../media/useAssetUrl'
 import { isMp3, type ManagedFile } from '../media/managedFile'
 import { useCoverPalette } from '../media/coverColor'
 import { AudioBackground } from './AudioBackground'
 import { useCanvasStore } from '../store/canvasStore'
-import { setPlayerEndedHandler, usePlayerStore } from '../store/playerStore'
+import { setOrderProvider, usePlayerStore, type EngineTrack, type PlaybackMode } from '../store/playerStore'
 import { toast } from '../store/uiStore'
 import type { SuqNode } from '../types'
-
-export type PlaybackMode = 'sequential' | 'random' | 'loop' | 'single' | 'flow'
 
 const LYRIC_OFFSET_KEY = 'suqcanvas:lyricOffsets'
 const LIKED_KEY = 'suqcanvas:likedSongs'
@@ -152,35 +149,9 @@ export function AudioPlayerView({
   // 从画布歌单入口(文本节点徽标)进入时,挂载后把该歌单设为播放队列;
   // 播放器已打开时再次点击徽标(initialPlaylistId 变化)也重新设置队列
   const queueInitRef = useRef<string | null | undefined>(undefined)
-  useEffect(() => {
-    if (queueInitRef.current === (initialPlaylistId ?? null)) return
-    if (!initialPlaylistId) {
-      queueInitRef.current = null
-      return
-    }
-    const playlist = playlists.find((item) => item.id === initialPlaylistId)
-    if (!playlist) return // 画布尚未解析出该歌单,playlists 变化后会重试
-    queueInitRef.current = initialPlaylistId
-    setPlaylistQueue({
-      id: playlist.id,
-      name: playlist.name,
-      assetIds: playlist.tracks.map((track) => track.assetId),
-    })
-    setMode('flow')
-  }, [playlists, initialPlaylistId])
   const [sort, setSort] = useState<'default' | 'title' | 'importer'>('default')
-  const [mode, setMode] = useState<PlaybackMode>(initialFlow ? 'flow' : 'sequential')
   const [flowOrder, setFlowOrder] = useState<string[]>([])
-  const flowOrderRef = useRef<string[]>([])
-  const modeRef = useRef<PlaybackMode>(mode)
-  modeRef.current = mode
-  flowOrderRef.current = flowOrder
-  // 正在播放的歌单队列(来自画布歌单);null 表示按全部歌曲列表/画布流式播放
-  const [playlistQueue, setPlaylistQueue] = useState<{ id: string; name: string; assetIds: string[] } | null>(null)
-  const playlistQueueRef = useRef(playlistQueue)
-  playlistQueueRef.current = playlistQueue
   const [query, setQuery] = useState('')
-  const [index, setIndex] = useState(() => Math.max(0, mp3Files.findIndex((file) => file.assetId === initialAssetId)))
   const [lyrics, setLyrics] = useState<LyricsData | null>(null)
   const [lyricsSource, setLyricsSource] = useState<string>()
   const [lyricsState, setLyricsState] = useState<'loading' | 'ready' | 'none'>('loading')
@@ -190,20 +161,15 @@ export function AudioPlayerView({
   const [liked, setLiked] = useState(false)
   const volume = usePlayerStore((s) => s.volume)
   const muted = usePlayerStore((s) => s.muted)
-  const trackPlaying = usePlayerStore((s) => s.trackPlaying)
-  const trackTime = usePlayerStore((s) => s.trackTime)
-  const trackDuration = usePlayerStore((s) => s.trackDuration)
-  const externalPlaying = usePlayerStore((s) => s.externalPlaying)
-  const externalTime = usePlayerStore((s) => s.currentTime)
-  const externalDuration = usePlayerStore((s) => s.duration)
-  const source = usePlayerStore((s) => s.source)
-  const externalAssetId = usePlayerStore((s) => s.external?.assetId)
-  const autoplayRef = useRef(false)
+  const mode = usePlayerStore((s) => s.mode)
+  const queue = usePlayerStore((s) => s.queue)
+  const track = usePlayerStore((s) => s.track)
+  const playing = usePlayerStore((s) => s.playing)
+  const currentTime = usePlayerStore((s) => s.time)
+  const duration = usePlayerStore((s) => s.duration)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lineRefs = useRef(new Map<number, HTMLButtonElement>())
   const freezeUntilRef = useRef(0)
-  const currentNameRef = useRef('')
-  const currentNodesRef = useRef<SuqNode[]>([])
 
   const orderedFiles = useMemo(() => {
     const result = [...mp3Files]
@@ -211,20 +177,6 @@ export function AudioPlayerView({
     else if (sort === 'importer') result.sort((a, b) => (a.nodes[0]?.data.createdByName ?? '').localeCompare(b.nodes[0]?.data.createdByName ?? '', 'zh-CN') || a.name.localeCompare(b.name, 'zh-CN'))
     return result
   }, [mp3Files, sort])
-  // 悬浮窗/歌单徽标等入口在播放器已打开时切换到目标歌曲:
-  // index 是挂载时初始化的,initialAssetId 变化必须手动跟随,否则显示的歌与进度停留在旧曲目
-  const initialAssetRef = useRef(initialAssetId)
-  useEffect(() => {
-    const prev = initialAssetRef.current
-    initialAssetRef.current = initialAssetId
-    if (prev === initialAssetId) return
-    // 非歌单入口的导航(如悬浮窗点击)退出歌单队列;歌单徽标入口由上面的队列初始化接管
-    if (!initialPlaylistId) setPlaylistQueue(null)
-    const targetIndex = orderedFiles.findIndex((file) => file.assetId === initialAssetId)
-    if (targetIndex >= 0) {
-      setIndex((currentIndex) => (currentIndex === targetIndex ? currentIndex : targetIndex))
-    }
-  }, [initialAssetId, orderedFiles, initialPlaylistId])
   const visibleFiles = useMemo(() => {
     const keyword = query.normalize('NFKC').toLocaleLowerCase().trim()
     if (!keyword) return orderedFiles
@@ -232,21 +184,58 @@ export function AudioPlayerView({
       (file) => file.name.toLocaleLowerCase().includes(keyword) || (file.nodes[0]?.data.createdByName ?? '').toLocaleLowerCase().includes(keyword),
     )
   }, [orderedFiles, query])
-  const current = orderedFiles[index] ?? orderedFiles[0]
+  // 当前曲目 = 引擎曲目；引擎尚未载入时以列表第一首作为展示占位
+  const current = useMemo<EngineTrack | null>(() => {
+    if (track) return track
+    const first = orderedFiles[0]
+    return first
+      ? { assetId: first.assetId, name: first.name, url: '', nodeId: first.nodes[0]?.id }
+      : null
+  }, [track, orderedFiles])
+  const currentFile = useMemo(
+    () => (current ? mp3Files.find((file) => file.assetId === current.assetId) : undefined),
+    [mp3Files, current],
+  )
+  // 歌词/专辑图等按当前曲目读取画布节点信息（用 ref 避免画布编辑时触发重载）
+  const currentNodesRef = useRef<SuqNode[]>([])
+  currentNodesRef.current = currentFile?.nodes ?? []
   // 当前曲目所属的画布歌单(未处于该歌单队列时,在标题下显示入口)
   const currentPlaylist = useMemo(
     () => findPlaylistByAsset(playlists, current?.assetId),
     [playlists, current?.assetId],
   )
-  const url = useAssetUrl(current?.assetId)
-  currentNameRef.current = current?.name ?? ''
-  currentNodesRef.current = current?.nodes ?? []
-  // 画布节点接管了当前这首歌时，播放器跟随节点的实时进度；否则显示播放器自身进度
-  const externalActive =
-    source === 'external' && externalAssetId !== undefined && current?.assetId === externalAssetId
-  const playing = externalActive ? externalPlaying : trackPlaying
-  const currentTime = externalActive ? externalTime : trackTime
-  const duration = externalActive ? externalDuration : trackDuration
+  // 播放器打开期间向引擎注册歌曲列表顺序(顺序/循环/随机模式的导航基准)
+  useEffect(() => {
+    setOrderProvider(() => orderedFiles.map((file) => file.assetId))
+    return () => setOrderProvider(null)
+  }, [orderedFiles])
+  // 打开时恢复播放模式(与旧行为一致:歌单/画布入口=流式,其余=顺序)
+  useEffect(() => {
+    usePlayerStore.getState().setMode(initialFlow ? 'flow' : 'sequential')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // 歌单徽标入口:设置队列并按歌单顺序起播
+  useEffect(() => {
+    if (queueInitRef.current === (initialPlaylistId ?? null)) return
+    if (!initialPlaylistId) {
+      queueInitRef.current = null
+      return
+    }
+    const playlist = playlists.find((item) => item.id === initialPlaylistId)
+    if (!playlist) return // 画布尚未解析出该歌单,playlists 变化后会重试
+    queueInitRef.current = initialPlaylistId
+    openPlaylist(playlist)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playlists, initialPlaylistId])
+  // 悬浮窗等入口在播放器已打开时切换到目标歌曲(歌单入口由上面的队列初始化接管)
+  useEffect(() => {
+    if (initialPlaylistId) return
+    const player = usePlayerStore.getState()
+    if (player.track?.assetId !== initialAssetId) {
+      player.setQueue(null)
+      player.play({ assetId: initialAssetId }, { autoplay: false })
+    }
+  }, [initialAssetId, initialPlaylistId])
   const totalOffset = (lyrics?.offsetMs ?? 0) / 1000 + lyricOffset
   const progress = duration > 0 ? (Math.min(currentTime, duration) / duration) * 100 : 0
   const coverUrl = albumUrls.length > 0 ? albumUrls[Math.min(albumIndex, albumUrls.length - 1)] : undefined
@@ -255,85 +244,43 @@ export function AudioPlayerView({
   const accent = palette?.accent ?? '#38bdf8'
   const accentRgb = palette?.accentRgb ?? '56,189,248'
 
-  const flowNext = (): boolean => {
-    // 歌单队列优先,否则按画布流式顺序(从当前曲沿连线 BFS/DFS 展开)
-    const order = playlistQueueRef.current?.assetIds ?? flowOrderRef.current
-    const pos = order.indexOf(current.assetId)
-    const nextId = pos >= 0 && pos < order.length - 1 ? order[pos + 1] : undefined
-    if (!nextId) return false
-    const fileIndex = orderedFiles.findIndex((file) => file.assetId === nextId)
-    if (fileIndex < 0) return false
-    setIndex(fileIndex)
-    return true
-  }
-  const nextTrack = (wrap: boolean): boolean => {
-    if (mode === 'flow') return flowNext()
-    if (orderedFiles.length < 2) return false
-    if (mode === 'random') {
-      let next = index
-      while (next === index) next = Math.floor(Math.random() * orderedFiles.length)
-      setIndex(next)
-      return true
-    }
-    if (index < orderedFiles.length - 1) {
-      setIndex(index + 1)
-      return true
-    }
-    if (mode === 'loop' || wrap) {
-      setIndex(0)
-      return true
-    }
-    return false
-  }
-  const prevTrack = () => {
-    autoplayRef.current = true
-    if (mode === 'flow') {
-      const order = playlistQueueRef.current?.assetIds ?? flowOrderRef.current
-      const pos = order.indexOf(current.assetId)
-      const prevId = pos > 0 ? order[pos - 1] : order[order.length - 1]
-      const fileIndex = orderedFiles.findIndex((file) => file.assetId === prevId)
-      if (fileIndex >= 0 && fileIndex !== index) setIndex(fileIndex)
-      return
-    }
-    setIndex(index > 0 ? index - 1 : orderedFiles.length - 1)
-  }
   const toggle = () => usePlayerStore.getState().toggle()
-  const cycleMode = () =>
-    setMode((currentMode) => {
-      const next = MODE_ORDER[(MODE_ORDER.indexOf(currentMode) + 1) % MODE_ORDER.length]
-      // 离开流式播放即退出歌单队列
-      if (next !== 'flow') setPlaylistQueue(null)
-      return next
-    })
+  const cycleMode = () => {
+    const next = MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.length]
+    // 离开流式播放即退出歌单队列（由引擎 setMode 处理）
+    usePlayerStore.getState().setMode(next)
+  }
   const applyVolume = (value: number) => usePlayerStore.getState().setVolume(value)
   const seekTo = (time: number) => usePlayerStore.getState().seekTo(Math.max(0, time - totalOffset))
   const seekProgress = (value: number) => usePlayerStore.getState().seekTo(value)
   const selectTrack = (file: ManagedFile) => {
-    const fileIndex = orderedFiles.findIndex((item) => item.assetId === file.assetId)
-    if (fileIndex < 0) return
-    if (fileIndex === index) {
-      // 用派生状态判断当前曲目是否在播放，避免 external 接管时误操作全局元素
-      if (!playing) toggle()
+    const player = usePlayerStore.getState()
+    if (player.track?.assetId === file.assetId) {
+      // 用引擎状态判断当前曲目是否在播放
+      if (!player.playing) player.toggle()
       return
     }
     // 手动点选歌曲即退出歌单队列,回到全部歌曲的导航上下文
-    setPlaylistQueue(null)
-    autoplayRef.current = true
-    setIndex(fileIndex)
+    player.setQueue(null)
+    player.play(
+      { assetId: file.assetId, name: file.name, nodeId: file.nodes[0]?.id },
+      { autoplay: true },
+    )
   }
   const openPlaylist = (playlist: Playlist) => {
-    const firstIndex = orderedFiles.findIndex(
-      (file) => file.assetId === playlist.tracks[0].assetId,
-    )
-    if (firstIndex < 0) return
-    setPlaylistQueue({
+    const first = playlist.tracks[0]
+    if (!first) return
+    const player = usePlayerStore.getState()
+    player.setQueue({
       id: playlist.id,
       name: playlist.name,
       assetIds: playlist.tracks.map((track) => track.assetId),
     })
-    setMode('flow')
-    autoplayRef.current = true
-    setIndex(firstIndex)
+    player.setMode('flow')
+    player.play(
+      { assetId: first.assetId, name: first.name, nodeId: first.nodeId },
+      { autoplay: true },
+    )
   }
   const downloadCurrent = async () => {
     if (!current) return
@@ -360,52 +307,12 @@ export function AudioPlayerView({
   }
 
   useEffect(() => {
-    setIndex((currentIndex) => Math.min(currentIndex, Math.max(0, orderedFiles.length - 1)))
-  }, [orderedFiles.length])
-
-  useEffect(() => {
-    const assetId = current?.assetId
-    if (!assetId) {
-      usePlayerStore.getState().setTrack(null)
-      return
-    }
-    let alive = true
-    void getAssetUrl(assetId)
-      .then((resolvedUrl) => {
-        if (!alive) return
-        usePlayerStore.getState().setTrack(
-          { assetId, name: currentNameRef.current, url: resolvedUrl },
-          { autoplay: autoplayRef.current },
-        )
-        autoplayRef.current = false
-      })
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [current?.assetId])
-
-  useEffect(() => {
     usePlayerStore.getState().setBarVisible(false)
     return () => {
       const state = usePlayerStore.getState()
-      if ((state.track && (state.trackPlaying || state.trackTime > 0)) || state.external) state.setBarVisible(true)
+      if (state.track && (state.playing || state.time > 0)) state.setBarVisible(true)
     }
   }, [])
-
-  useEffect(() => {
-    setPlayerEndedHandler(() => {
-      if (mode === 'single') {
-        const player = usePlayerStore.getState()
-        player.seekTo(0)
-        player.toggle()
-      } else {
-        // 顺序播放最后一首播完即停；列表循环/随机自然播完时从头或随机继续
-        autoplayRef.current = nextTrack(mode === 'loop')
-      }
-    })
-    return () => setPlayerEndedHandler(null)
-  })
 
   const updateLyricOffset = (change: (prev: number) => number) => {
     setLyricOffset((prev) => {
@@ -434,10 +341,10 @@ export function AudioPlayerView({
   }, [mode])
 
   useEffect(() => {
-    if (modeRef.current === 'flow') {
+    if (mode === 'flow') {
       setFlowOrder(buildFlowOrder(current?.assetId ?? ''))
     }
-  }, [current?.assetId])
+  }, [current?.assetId, mode])
 
   useEffect(() => {
     const assetId = current?.assetId
@@ -498,8 +405,15 @@ export function AudioPlayerView({
   // 收集画布上与当前 mp3 通过连线（串联/并联均可）关联的图片作为专辑背景
   const findAlbumImages = (): string[] => {
     const { nodes: canvasNodes, edges } = useCanvasStore.getState()
-    const startIds = new Set(currentNodesRef.current.map((node) => node.id))
+    const currentNodes = currentNodesRef.current
+    const startIds = new Set(currentNodes.map((node) => node.id))
     const collected: string[] = []
+    // 节点上显式设置的专辑图优先
+    for (const node of currentNodes) {
+      if (node.data.coverAssetId && !collected.includes(node.data.coverAssetId)) {
+        collected.push(node.data.coverAssetId)
+      }
+    }
     const visited = new Set<string>(startIds)
     const queue = [...startIds]
     let hops = 0
@@ -525,6 +439,9 @@ export function AudioPlayerView({
     }
     return collected
   }
+
+  // 节点显式设置的专辑图变化时（同一首歌）也重新收集背景
+  const coverIdsKey = canvasNodes.map((node) => node.data.coverAssetId ?? '').join(',')
 
   useEffect(() => {
     const assetId = current?.assetId
@@ -555,7 +472,9 @@ export function AudioPlayerView({
     return () => {
       alive = false
     }
-  }, [current?.assetId])
+    // 仅在切歌或封面变化时重新收集
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.assetId, coverIdsKey])
 
   // 多张专辑图时每 5 秒轮换一张(背景水波纹与唱片封面同步切换)
   useEffect(() => {
@@ -619,8 +538,8 @@ export function AudioPlayerView({
       </div>
       <div className="absolute right-5 top-5 z-20 flex items-center gap-2">
         <span className="hidden rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-xs text-white/70 backdrop-blur-md sm:inline">
-          {playlistQueue
-            ? `歌单「${playlistQueue.name}」· ${playlistQueue.assetIds.length} 首`
+          {queue
+            ? `歌单「${queue.name}」· ${queue.assetIds.length} 首`
             : `共 ${mp3Files.length} 首`}
         </span>
         <button
@@ -691,9 +610,7 @@ export function AudioPlayerView({
                       <option value="importer">按导入人</option>
                     </select>
                     <select value={mode} onChange={(event) => {
-                      const next = event.target.value as PlaybackMode
-                      if (next !== 'flow') setPlaylistQueue(null)
-                      setMode(next)
+                      usePlayerStore.getState().setMode(event.target.value as PlaybackMode)
                     }} aria-label="播放模式" className="min-w-0 flex-1 rounded border border-edge2 bg-panel2 px-2 py-1 text-[11px] text-soft">
                       <option value="sequential">顺序播放</option>
                       <option value="loop">列表循环</option>
@@ -706,7 +623,7 @@ export function AudioPlayerView({
                 <div className="min-h-0 flex-1 overflow-y-auto py-2 pr-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {visibleFiles.length > 0 ? visibleFiles.map((file) => {
                     const isActive = file.assetId === current.assetId
-                    const flowPos = mode === 'flow' ? (playlistQueue?.assetIds ?? flowOrder).indexOf(file.assetId) : -1
+                    const flowPos = mode === 'flow' ? (queue?.assetIds ?? flowOrder).indexOf(file.assetId) : -1
                     return (
                       <button
                         key={file.assetId}
@@ -746,7 +663,7 @@ export function AudioPlayerView({
                   </div>
                 ) : (
                   playlists.map((playlist) => {
-                    const isActive = playlistQueue?.id === playlist.id
+                    const isActive = queue?.id === playlist.id
                     return (
                       <button
                         key={playlist.id}
@@ -829,9 +746,9 @@ export function AudioPlayerView({
                   <span className="text-white/85">{lyrics?.meta.ar ?? lyrics?.meta.artist}</span>
                 )}
                 {(lyrics?.meta.ar || lyrics?.meta.artist) && <span className="mx-1.5 text-white/25">·</span>}
-                <span className="text-white/45">导入人 {current.nodes[0]?.data.createdByName ?? '未知'}</span>
+                <span className="text-white/45">导入人 {currentFile?.nodes[0]?.data.createdByName ?? '未知'}</span>
               </p>
-              {currentPlaylist && playlistQueue?.id !== currentPlaylist.id && (
+              {currentPlaylist && queue?.id !== currentPlaylist.id && (
                 <div className="mt-3.5">
                   <button
                     type="button"
@@ -933,7 +850,7 @@ export function AudioPlayerView({
                 type="button"
                 className="rounded-full p-3 text-white/75 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30"
                 title="上一首"
-                onClick={prevTrack}
+                onClick={() => usePlayerStore.getState().prev()}
                 disabled={orderedFiles.length < 2}
               >
                 <PrevIcon className="h-6 w-6" />
@@ -943,7 +860,7 @@ export function AudioPlayerView({
                 className="flex h-14 w-14 items-center justify-center rounded-full text-slate-950 transition-transform hover:scale-105 active:scale-95 disabled:opacity-40"
                 style={{ background: accent, boxShadow: `0 10px 32px rgba(${accentRgb}, 0.33)` }}
                 onClick={toggle}
-                disabled={!url}
+                disabled={!track}
               >
                 {playing ? <PauseIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6 translate-x-0.5" />}
               </button>
@@ -951,7 +868,7 @@ export function AudioPlayerView({
                 type="button"
                 className="rounded-full p-3 text-white/75 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30"
                 title="下一首"
-                onClick={() => { autoplayRef.current = true; nextTrack(true) }}
+                onClick={() => usePlayerStore.getState().next({ wrap: true })}
                 disabled={orderedFiles.length < 2}
               >
                 <NextIcon className="h-6 w-6" />

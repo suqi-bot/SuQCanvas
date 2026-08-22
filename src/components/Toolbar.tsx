@@ -4,7 +4,7 @@ import { useUiStore, type ToolMode } from '../store/uiStore'
 import { useProjectStore, type SaveStatus } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useCanvasStore, type AlignMode } from '../store/canvasStore'
-import { selectNowPlaying, usePlayerStore } from '../store/playerStore'
+import { usePlayerStore } from '../store/playerStore'
 import { exportCurrentProject } from '../io/importExport'
 import { LanPanel } from './LanPanel'
 import { IS_LAN_BUILD } from '../buildMode'
@@ -119,9 +119,8 @@ export function Toolbar() {
   const alignSelected = useCanvasStore((s) => s.alignSelected)
   const selectedCount = useCanvasStore((s) => s.nodes.filter((n) => n.selected).length)
   const track = usePlayerStore((s) => s.track)
-  const external = usePlayerStore((s) => s.external)
-  const audioPlaying = usePlayerStore(selectNowPlaying)
-  const hasAudio = track !== null || external !== null
+  const audioPlaying = usePlayerStore((s) => s.playing)
+  const hasAudio = track !== null
   const barVisible = usePlayerStore((s) => s.barVisible)
   const showCd = hasAudio && !barVisible
 

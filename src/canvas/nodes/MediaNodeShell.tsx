@@ -21,12 +21,21 @@ interface ShellProps {
   node: NodeProps<SuqNode>
   children: ReactNode
   showBar?: boolean
+  /** 底部名称栏始终显示（不依赖选中态） */
+  alwaysShowBar?: boolean
+  /** 插入者角标始终显示（不依赖悬停/选中） */
+  alwaysShowCreator?: boolean
+  /** 0..1 播放进度，渲染为铺满整个节点的填充遮罩 */
+  progress?: number
 }
 
 export const MediaNodeShell = memo(function MediaNodeShell({
   node,
   children,
   showBar = true,
+  alwaysShowBar = false,
+  alwaysShowCreator = false,
+  progress,
 }: ShellProps) {
   const { id, data, selected } = node
   const [hovered, setHovered] = useState(false)
@@ -97,7 +106,7 @@ export const MediaNodeShell = memo(function MediaNodeShell({
 
       <div className="min-h-0 flex-1">{children}</div>
 
-      {showBar && selected && (
+      {showBar && (selected || alwaysShowBar) && (
         <div
           className="flex h-7 shrink-0 items-center gap-1.5 border-t bg-[var(--nodebar)] px-2"
           style={{ borderColor: 'var(--nodebarline)' }}
@@ -111,13 +120,22 @@ export const MediaNodeShell = memo(function MediaNodeShell({
         </div>
       )}
 
-      {data.createdByName && (hovered || selected) && (
+      {data.createdByName && (hovered || selected || alwaysShowCreator) && (
         <span
           className="pointer-events-none absolute bottom-1.5 right-1.5 max-w-[70%] truncate rounded bg-panel/90 px-1.5 py-0.5 text-[10px] text-dim shadow"
           title={`由 ${data.createdByName} 插入`}
         >
           {data.createdByName}
         </span>
+      )}
+
+      {progress !== undefined && (
+        <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+          <div
+            className="h-full bg-sky-400/20 transition-[width] duration-200 ease-linear"
+            style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
+          />
+        </div>
       )}
 
       {lock && (

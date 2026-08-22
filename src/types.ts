@@ -93,6 +93,8 @@ export interface SuqNodeData extends Record<string, unknown> {
   createdByName?: string
   createdAt?: number
   assetUpdatedAt?: number
+  /** 音乐节点显式设置的专辑图素材 id */
+  coverAssetId?: string
 }
 
 export interface SuqEdgeData extends Record<string, unknown> {
