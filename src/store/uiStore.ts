@@ -28,8 +28,8 @@ interface UiState {
   closeMarkdownViewer: () => void
   fileManagerOpen: boolean
   setFileManagerOpen: (open: boolean) => void
-  playerTarget: { assetId: string; flow: boolean } | null
-  openMusicPlayer: (assetId: string, flow?: boolean) => void
+  playerTarget: { assetId: string; flow: boolean; playlistId?: string } | null
+  openMusicPlayer: (assetId: string, flow?: boolean, playlistId?: string) => void
   homeOpen: boolean
   setHomeOpen: (open: boolean) => void
   tool: ToolMode
@@ -84,8 +84,11 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ fileManagerOpen })
   },
   playerTarget: null,
-  openMusicPlayer: (assetId, flow = false) => {
-    set({ playerTarget: { assetId, flow }, fileManagerOpen: true })
+  openMusicPlayer: (assetId, flow = false, playlistId) => {
+    set({
+      playerTarget: { assetId, flow, ...(playlistId ? { playlistId } : {}) },
+      fileManagerOpen: true,
+    })
   },
   homeOpen: false,
   setHomeOpen: (open) => {

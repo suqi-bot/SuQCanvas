@@ -12,6 +12,7 @@ import type {
   PathType,
   ShapeType,
   StickyColor,
+  SuqEdge,
   TextAlign,
   TextAlignV,
 } from '../types'
@@ -193,6 +194,12 @@ export function InspectorPanel() {
   const firstEdge = selectedEdges[0]
   const firstNode = selectedEditableNodes[0]
 
+  const isAudioKind = (nodeId: string): boolean =>
+    nodes.find((node) => node.id === nodeId)?.data.kind === 'audio'
+  const isAudioEdge = (e: SuqEdge): boolean => isAudioKind(e.source) && isAudioKind(e.target)
+  const forkDegree = (sourceId: string): number =>
+    edges.filter((e) => e.source === sourceId && isAudioKind(e.target)).length
+
   const downloadNodeAsset = async () => {
     const assetId = firstNode.data.assetId
     if (!assetId) return
@@ -277,6 +284,62 @@ export function InspectorPanel() {
             />
             <span className="text-xs text-mid">{firstEdge.data.style.strokeWidth}px</span>
           </Section>
+          {selectedEdges.length === 1 &&
+            isAudioEdge(firstEdge) &&
+            forkDegree(firstEdge.source) >= 2 && (
+              <Section title="播放顺序">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    title="顺序 -1"
+                    className="h-7 w-9 shrink-0 rounded-md border border-edge2 text-xs text-soft hover:bg-hover"
+                    onClick={() =>
+                      updateEdgeData(firstEdge.id, {
+                        order: Math.max(1, (firstEdge.data.order ?? 1) - 1),
+                      })
+                    }
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    value={firstEdge.data.order ?? ''}
+                    placeholder="未设置"
+                    aria-label="播放顺序"
+                    onChange={(e) => {
+                      const v = e.target.value
+                      updateEdgeData(firstEdge.id, {
+                        order: v === '' ? undefined : Math.max(1, Math.floor(Number(v) || 1)),
+                      })
+                    }}
+                    className="min-w-0 flex-1 rounded-md border border-edge2 bg-panel2 px-2 py-1.5 text-xs tabular-nums text-main outline-none focus:border-sky-500"
+                  />
+                  <button
+                    type="button"
+                    title="顺序 +1"
+                    className="h-7 w-9 shrink-0 rounded-md border border-edge2 text-xs text-soft hover:bg-hover"
+                    onClick={() =>
+                      updateEdgeData(firstEdge.id, { order: (firstEdge.data.order ?? 0) + 1 })
+                    }
+                  >
+                    +
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[10px] leading-relaxed text-dim">
+                  分叉处数字越小越先播放;未设置时按连线创建顺序
+                </p>
+                {firstEdge.data.order !== undefined && (
+                  <button
+                    type="button"
+                    onClick={() => updateEdgeData(firstEdge.id, { order: undefined })}
+                    className="mt-1.5 w-full rounded-md border border-edge2 px-2 py-1 text-xs text-soft hover:bg-hover"
+                  >
+                    清除顺序
+                  </button>
+                )}
+              </Section>
+            )}
         </>
       )}
 

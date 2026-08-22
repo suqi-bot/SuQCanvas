@@ -291,6 +291,34 @@ export function ForwardIcon(props: IconProps) {
   )
 }
 
+export function HeartIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M12 20.5l-1.2-1.1C6.7 15.9 3.5 13 3.5 9.4 3.5 6.7 5.6 4.6 8.2 4.6c1.5 0 2.9.7 3.8 1.9.9-1.2 2.3-1.9 3.8-1.9 2.6 0 4.7 2.1 4.7 4.8 0 3.6-3.2 6.5-7.3 10z" />
+    </Base>
+  )
+}
+
+export function MoreIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="5" cy="12" r="1.2" fill="currentColor" strokeWidth="0" />
+      <circle cx="12" cy="12" r="1.2" fill="currentColor" strokeWidth="0" />
+      <circle cx="19" cy="12" r="1.2" fill="currentColor" strokeWidth="0" />
+    </Base>
+  )
+}
+
+export function QueueIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4 6h12M4 12h12M4 18h8" />
+      <path d="M19 15V6" />
+      <path d="M16 8l3-2 3 2" />
+    </Base>
+  )
+}
+
 export function SunIcon(props: IconProps) {
   return (
     <Base {...props}>

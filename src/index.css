@@ -390,9 +390,9 @@ body {
 .sq-range {
   -webkit-appearance: none;
   appearance: none;
-  height: 4px;
+  height: 5px;
   border-radius: 9999px;
-  background: linear-gradient(to right, #38bdf8 var(--sq-fill, 0%), var(--edge2) var(--sq-fill, 0%));
+  background: linear-gradient(to right, var(--sq-accent, #38bdf8) var(--sq-fill, 0%), rgba(255, 255, 255, 0.14) var(--sq-fill, 0%));
   outline: none;
   cursor: pointer;
 }
@@ -400,26 +400,26 @@ body {
 .sq-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   border-radius: 9999px;
-  background: var(--main);
+  background: #fff;
   border: none;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--sq-accent, #38bdf8) 32%, transparent), 0 2px 10px rgba(0, 0, 0, 0.55);
   transition: transform 0.12s ease;
 }
 
 .sq-range::-webkit-slider-thumb:hover {
-  transform: scale(1.25);
+  transform: scale(1.18);
 }
 
 .sq-range::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   border-radius: 9999px;
-  background: var(--main);
+  background: #fff;
   border: none;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--sq-accent, #38bdf8) 32%, transparent), 0 2px 10px rgba(0, 0, 0, 0.55);
 }
 
 /* MP3 播放器：专辑背景图轮播淡入 */
@@ -541,4 +541,102 @@ body {
 .sq-markdown td {
   border: 1px solid var(--mdborder);
   padding: 0.3em 0.6em;
+}
+
+/* 沉浸式播放器：频谱可视化条 */
+.sq-visualizer {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 22px;
+}
+
+.sq-visualizer span {
+  flex: 1;
+  min-width: 2px;
+  max-width: 6px;
+  border-radius: 2px;
+  background: linear-gradient(to top, #38bdf8, rgba(56, 189, 248, 0.35));
+  transform-origin: bottom;
+  animation: sq-vis-bounce 1.15s ease-in-out infinite;
+}
+
+.sq-visualizer.sq-vis-paused span {
+  animation-play-state: paused;
+  transform: scaleY(0.28);
+}
+
+@keyframes sq-vis-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.28);
+  }
+
+  40% {
+    opacity: 0.85;
+  }
+
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+/* 沉浸式播放器：歌词状态切换 */
+.sq-lyric {
+  transition: color 0.45s ease, opacity 0.45s ease, transform 0.45s ease, text-shadow 0.45s ease;
+}
+
+.sq-lyric-active {
+  color: #fff;
+  opacity: 1;
+  transform: scale(1.02);
+  text-shadow: 0 0 30px color-mix(in srgb, var(--sq-accent, #38bdf8) 62%, transparent), 0 2px 12px rgba(0, 0, 0, 0.65);
+}
+
+.sq-lyric-dim {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+/* MP3 播放器：唱片纹理与高光 */
+.sq-disc-grooves {
+  background: repeating-radial-gradient(circle at center, #161d27 0 1px, #0a0f17 1px 2.6px);
+}
+
+.sq-disc-shine {
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.18), transparent 42%),
+    radial-gradient(circle at 72% 82%, rgba(255, 255, 255, 0.06), transparent 46%);
+}
+
+/* MP3 播放器：唱片背后随主色呼吸的光晕 */
+.sq-disc-halo {
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--sq-accent, #38bdf8) 30%, transparent) 0%,
+    color-mix(in srgb, var(--sq-accent, #38bdf8) 10%, transparent) 45%,
+    transparent 70%
+  );
+  filter: blur(12px);
+  animation: sq-halo-breathe 3.4s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes sq-halo-breathe {
+  0%,
+  100% {
+    opacity: 0.6;
+    transform: scale(0.97);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+}
+
+/* 沉浸式播放器：歌词上下渐隐 */
+.sq-lyric-mask {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 86%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 86%, transparent 100%);
 }

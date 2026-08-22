@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>SuQCanvas 宣传片</title>
+<style>
+  :root {
+    --app: #020617;
+    --panel: #0f172a;
+    --panel2: #1e293b;
+    --border: #1e293b;
+    --border2: #334155;
+    --main: #f1f5f9;
+    --soft: #cbd5e1;
+    --mid: #94a3b8;
+    --dim: #64748b;
+    --sky: #38bdf8;
+    --violet: #a78bfa;
+    --emerald: #34d399;
+    --amber: #fbbf24;
+    --pink: #f472b6;
+    --rose: #fb7185;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background: var(--app);
+    color: var(--main);
+    font-family: 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .stage { position: fixed; inset: 0; }
+
+  /* ---------- 全局背景 ---------- */
+  .bg-dots {
+    position: absolute; inset: -200px;
+    background-image: radial-gradient(rgba(148, 163, 184, 0.16) 1px, transparent 1px);
+    background-size: 36px 36px;
+    animation: bg-drift 50s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes bg-drift {
+    from { transform: translate(0, 0); }
+    to { transform: translate(36px, 36px); }
+  }
+  .bg-glow {
+    position: absolute; width: 1200px; height: 1200px; left: 50%; top: 42%;
+    margin: -600px 0 0 -600px;
+    background: radial-gradient(closest-side, rgba(56, 189, 248, 0.10), transparent 70%);
+    animation: glow-breathe 7s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes glow-breathe {
+    0%, 100% { opacity: 0.7; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.08); }
+  }
+  .vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(2, 6, 23, 0.55) 100%);
+    pointer-events: none;
+  }
+
+  /* ---------- 场景通用 ---------- */
+  .scene {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    opacity: 0; visibility: hidden;
+    transition: opacity 0.35s ease, visibility 0.35s;
+  }
+  .scene.active { opacity: 1; visibility: visible; }
+
+  .scene-title {
+    font-size: 64px; font-weight: 700; letter-spacing: 2px;
+    text-align: center; line-height: 1.25;
+  }
+  .scene-sub {
+    margin-top: 18px; font-size: 28px; color: var(--mid); text-align: center;
+  }
+  .accent { color: var(--sky); }
+  .grad-text {
+    background: linear-gradient(92deg, #38bdf8 0%, #22d3ee 45%, #a78bfa 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+
+  .anim { opacity: 0; }
+  .scene.active .anim { animation: fade-up 0.65s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .scene.active .anim-pop { animation: pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  .scene.active .anim-fade { animation: fade-in 0.6s ease both; }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(30px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes pop {
+    from { opacity: 0; transform: scale(0.82); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .d1 { animation-delay: 0.09s !important; }
+  .d2 { animation-delay: 0.18s !important; }
+  .d3 { animation-delay: 0.27s !important; }
+  .d4 { animation-delay: 0.36s !important; }
+  .d5 { animation-delay: 0.45s !important; }
+  .d6 { animation-delay: 0.54s !important; }
+  .d7 { animation-delay: 0.63s !important; }
+  .d8 { animation-delay: 0.72s !important; }
+  .d9 { animation-delay: 0.81s !important; }
+  .d10 { animation-delay: 0.9s !important; }
+  .d11 { animation-delay: 0.99s !important; }
+  .d12 { animation-delay: 1.08s !important; }
+
+  /* ---------- 进度条 / 指示点 ---------- */
+  #progress {
+    position: absolute; top: 0; left: 0; height: 4px; width: 0%;
+    background: linear-gradient(90deg, #38bdf8, #22d3ee);
+    z-index: 50;
+  }
+  #dots {
+    position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; z-index: 50;
+  }
+  #dots i {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--border2); transition: all 0.3s;
+  }
+  #dots i.on { background: var(--sky); width: 26px; border-radius: 4px; }
+  #hud {
+    position: absolute; top: 22px; right: 30px; z-index: 50;
+    font-size: 15px; color: var(--dim); letter-spacing: 1px;
+  }
+
+  /* ================= Scene 1: 开场 ================= */
+  #s1 .logo-mark {
+    width: 148px; height: 148px; margin-bottom: 34px;
+  }
+  #s1 .logo-mark svg { width: 100%; height: 100%; }
+  #s1 .logo-draw path { stroke-dasharray: 240; stroke-dashoffset: 240; }
+  #s1.active .logo-draw path { animation: draw 1.4s 0.3s ease-out forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  #s1 .brand { font-size: 112px; font-weight: 800; letter-spacing: 4px; }
+  #s1 .tag { margin-top: 26px; font-size: 40px; color: var(--soft); letter-spacing: 6px; }
+  #s1 .desc { margin-top: 22px; font-size: 24px; color: var(--mid); }
+
+  /* ================= Scene 2: 无限画布 ================= */
+  #s2 { flex-direction: row; gap: 90px; padding: 0 120px; }
+  #s2 .col-l { flex: 0 0 auto; }
+  #s2 .col-l h2 { font-size: 58px; font-weight: 700; line-height: 1.3; }
+  #s2 .col-l .pt { margin-bottom: 16px; font-size: 22px; color: var(--sky); letter-spacing: 4px; }
+  #s2 .col-l ul { list-style: none; margin-top: 36px; }
+  #s2 .col-l li {
+    font-size: 27px; color: var(--soft); margin: 17px 0; display: flex; align-items: center; gap: 14px;
+  }
+  #s2 .col-l li::before {
+    content: ''; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--sky); box-shadow: 0 0 12px rgba(56, 189, 248, 0.9); flex: none;
+  }
+  #s2 .canvas-mock {
+    position: relative; width: 860px; height: 560px; border-radius: 18px;
+    background: var(--panel); border: 1px solid var(--border2);
+    overflow: hidden; flex: none;
+  }
+  #s2 .canvas-mock .inner {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(148, 163, 184, 0.14) 1px, transparent 1px);
+    background-size: 28px 28px;
+    animation: cam 7.5s ease-in-out infinite;
+  }
+  @keyframes cam {
+    0% { transform: scale(1) translate(0, 0); }
+    25% { transform: scale(1.22) translate(-120px, 70px); }
+    50% { transform: scale(1.22) translate(-120px, 70px); }
+    75% { transform: scale(0.92) translate(60px, -40px); }
+    100% { transform: scale(1) translate(0, 0); }
+  }
+  .mock-node {
+    position: absolute; width: 210px; background: rgba(30, 41, 59, 0.96);
+    border: 1px solid var(--border2); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  }
+  .mock-node .bar {
+    height: 26px; display: flex; align-items: center; gap: 7px;
+    padding: 0 10px; font-size: 13px; color: var(--soft);
+    background: rgba(15, 23, 42, 0.6); border-bottom: 1px solid var(--border);
+    border-radius: 10px 10px 0 0;
+  }
+  .mock-node .bar b {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+  }
+  .mock-node .body { height: 110px; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 15px; }
+  .mock-node.img { left: 90px; top: 80px; }
+  .mock-node.video { left: 520px; top: 60px; }
+  .mock-node.text { left: 120px; top: 360px; }
+  .mock-node.pdf { left: 530px; top: 350px; }
+  .mock-edge {
+    position: absolute; left: 300px; top: 140px; width: 220px; height: 210px; pointer-events: none;
+  }
+  .mock-edge path { stroke: var(--sky); stroke-width: 2.5; fill: none; }
+  #s2 .zoom-badge {
+    position: absolute; right: 16px; bottom: 16px;
+    background: var(--panel2); border: 1px solid var(--border2); color: var(--soft);
+    font-size: 15px; padding: 6px 14px; border-radius: 999px; letter-spacing: 1px;
+  }
+  .sel-rect {
+    position: absolute; left: 60px; top: 60px; width: 300px; height: 380px;
+    border: 1.5px dashed rgba(56, 189, 248, 0.7); border-radius: 6px;
+    background: rgba(56, 189, 248, 0.07); opacity: 0;
+    animation: sel-pulse 4s ease-in-out infinite;
+  }
+  @keyframes sel-pulse {
+    0% { opacity: 0; }
+    12% { opacity: 1; }
+    45% { opacity: 1; }
+    60% { opacity: 0; }
+    100% { opacity: 0; }
+  }
+
+  /* ================= Scene 3: 多媒体元素 ================= */
+  #s3 { gap: 44px; }
+  #s3 .cards { display: grid; grid-template-columns: repeat(4, 300px); gap: 26px; }
+  .mcard {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 16px; padding: 26px 24px;
+    transition: border-color 0.3s, transform 0.3s;
+  }
+  .mcard:hover { border-color: var(--sky); transform: translateY(-6px); }
+  .mcard .icon {
+    width: 58px; height: 58px; border-radius: 14px; display: flex;
+    align-items: center; justify-content: center; margin-bottom: 16px;
+  }
+  .mcard h3 { font-size: 25px; font-weight: 600; margin-bottom: 8px; }
+  .mcard .f { font-size: 16px; color: var(--sky); letter-spacing: 1px; margin-bottom: 8px; }
+  .mcard p { font-size: 17px; color: var(--mid); line-height: 1.5; }
+  .ic-sky { background: rgba(56, 189, 248, 0.13); color: var(--sky); }
+  .ic-violet { background: rgba(167, 139, 250, 0.13); color: var(--violet); }
+  .ic-emerald { background: rgba(52, 211, 153, 0.13); color: var(--emerald); }
+  .ic-amber { background: rgba(251, 191, 36, 0.13); color: var(--amber); }
+  .ic-pink { background: rgba(244, 114, 182, 0.13); color: var(--pink); }
+  .ic-rose { background: rgba(251, 113, 133, 0.13); color: var(--rose); }
+  .mcard .icon svg { width: 30px; height: 30px; }
+  .mcard.wide { grid-column: span 2; }
+  #s3 .hint { font-size: 20px; color: var(--dim); margin-top: 10px; }
+  #s3 .hint b { color: var(--soft); font-weight: 600; }
+
+  /* ================= Scene 4: 连线系统 ================= */
+  #s4 { gap: 40px; }
+  #s4 .edge-stage {
+    position: relative; width: 1060px; height: 480px;
+    background: var(--panel); border: 1px solid var(--border2); border-radius: 18px;
+  }
+  #s4 .edge-stage .inner {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(148, 163, 184, 0.14) 1px, transparent 1px);
+    background-size: 28px 28px; border-radius: 18px;
+  }
+  #s4 svg.lines { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #s4 svg.lines path { fill: none; stroke-width: 3; }
+  #s4.active svg.lines path {
+    animation: draw-edge 1.3s cubic-bezier(0.5, 0, 0.2, 1) both;
+  }
+  @keyframes draw-edge { from { stroke-dashoffset: var(--len, 500); } to { stroke-dashoffset: 0; } }
+  .enode {
+    position: absolute; width: 190px; padding: 18px 20px; text-align: center;
+    background: rgba(30, 41, 59, 0.96); border: 1px solid var(--border2); border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  }
+  .enode b { display: block; font-size: 22px; margin-bottom: 6px; }
+  .enode span { font-size: 15px; color: var(--mid); }
+  .enode.c { left: 435px; top: 190px; }
+  .enode.tl { left: 120px; top: 60px; }
+  .enode.tr { left: 750px; top: 60px; }
+  .enode.bl { left: 120px; top: 340px; }
+  .enode.br { left: 750px; top: 340px; }
+  .enode .hd { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--sky); border: 2px solid #0f172a; }
+  .enode .hd { display: none; }
+  #s4 .tags { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  #s4 .tags span {
+    font-size: 20px; padding: 9px 22px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--border2); color: var(--soft);
+  }
+  #s4 .tags span i { font-style: normal; font-weight: 700; }
+  .c-sky { color: var(--sky) !important; }
+  .c-violet { color: var(--violet) !important; }
+  .c-emerald { color: var(--emerald) !important; }
+  .c-amber { color: var(--amber) !important; }
+
+  /* ================= Scene 5: MP3 播放器 ================= */
+  #s5 { gap: 36px; }
+  .player-card {
+    display: flex; align-items: center; gap: 80px;
+    background: var(--panel); border: 1px solid var(--border2);
+    border-radius: 24px; padding: 46px 70px;
+  }
+  .disc {
+    position: relative; width: 330px; height: 330px; border-radius: 50%; flex: none;
+    background:
+      radial-gradient(circle at center, #0f172a 0 40px, transparent 41px),
+      repeating-radial-gradient(circle at center, #334155 0 3px, #0f172a 3px 7px);
+    box-shadow: 0 0 70px rgba(56, 189, 248, 0.22);
+    animation: disc-spin 4.5s linear infinite;
+  }
+  .disc .shine {
+    position: absolute; inset: 0; border-radius: 50%;
+    background: conic-gradient(from 210deg, rgba(255,255,255,0.16), rgba(255,255,255,0) 30%, rgba(255,255,255,0.12) 55%, rgba(255,255,255,0) 80%);
+  }
+  .disc .center {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 120px; height: 120px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #7dd3fc, #0284c7 70%);
+    display: flex; align-items: center; justify-content: center;
+    color: #f0f9ff; font-size: 20px; font-weight: 700; letter-spacing: 1px;
+    text-align: center; line-height: 1.3;
+  }
+  .disc .hole {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 14px; height: 14px; border-radius: 50%; background: #020617; z-index: 3;
+  }
+  @keyframes disc-spin { to { transform: rotate(360deg); } }
+  .player-info { display: flex; flex-direction: column; gap: 20px; }
+  .player-info .ptitle { font-size: 36px; font-weight: 700; }
+  .player-info .partist { font-size: 20px; color: var(--mid); margin-top: -12px; }
+  .eq { display: flex; align-items: flex-end; gap: 7px; height: 46px; }
+  .eq span { width: 9px; border-radius: 4px; background: var(--sky); height: 46px; animation: eq-bounce 0.8s ease-in-out infinite; }
+  .eq span:nth-child(2) { animation-delay: 0.18s; height: 34px; }
+  .eq span:nth-child(3) { animation-delay: 0.36s; }
+  .eq span:nth-child(4) { animation-delay: 0.09s; height: 30px; }
+  .eq span:nth-child(5) { animation-delay: 0.27s; height: 38px; }
+  @keyframes eq-bounce { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
+  .prog-wrap { width: 470px; height: 8px; background: var(--border2); border-radius: 99px; overflow: hidden; }
+  .prog-fill { height: 100%; width: 0; border-radius: 99px; background: linear-gradient(90deg, #38bdf8, #22d3ee); animation: prog-move 3.2s ease-in-out infinite; }
+  @keyframes prog-move { 0%, 8% { width: 0; } 70%, 100% { width: 74%; } }
+  .time-row { display: flex; justify-content: space-between; width: 470px; font-size: 16px; color: var(--dim); margin-top: 8px; }
+  .ctl-row { display: flex; align-items: center; gap: 18px; }
+  .ctl-btn {
+    width: 56px; height: 56px; border-radius: 50%; background: var(--sky);
+    display: flex; align-items: center; justify-content: center; color: #082f49; flex: none;
+  }
+  .ctl-btn svg { width: 24px; height: 24px; }
+  .ctl-mini {
+    width: 46px; height: 46px; border-radius: 12px; background: var(--panel2);
+    border: 1px solid var(--border2); color: var(--soft);
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .ctl-mini svg { width: 20px; height: 20px; }
+  .vol-wrap { position: relative; width: 150px; height: 6px; background: var(--border2); border-radius: 99px; margin-left: 6px; }
+  .vol-fill { width: 78%; height: 100%; background: var(--soft); border-radius: 99px; }
+  .vol-dot { position: absolute; left: 78%; top: 50%; transform: translate(-50%, -50%); width: 15px; height: 15px; border-radius: 50%; background: var(--main); box-shadow: 0 1px 5px rgba(0,0,0,0.4); }
+  .albums { display: flex; gap: 12px; }
+  .album { width: 68px; height: 68px; border-radius: 12px; }
+  .album.a1 { background: linear-gradient(135deg, #0ea5e9, #6366f1); animation: album-fade 2.4s ease-in-out infinite alternate; }
+  .album.a2 { background: linear-gradient(135deg, #a78bfa, #ec4899); }
+  @keyframes album-fade { from { opacity: 0.35; } to { opacity: 1; } }
+  #s5 .audio-feats { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  #s5 .audio-feats span {
+    font-size: 19px; padding: 9px 22px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--border2); color: var(--soft);
+  }
+
+  /* ================= Scene 6: 数据安全 ================= */
+  #s6 { flex-direction: row; gap: 70px; padding: 0 130px; }
+  #s6 .panel-box {
+    width: 470px; background: var(--panel); border: 1px solid var(--border2);
+    border-radius: 18px; padding: 30px;
+  }
+  #s6 h2 { font-size: 34px; font-weight: 700; margin-bottom: 8px; }
+  #s6 .box-sub { font-size: 18px; color: var(--mid); margin-bottom: 26px; }
+  .flow { display: flex; align-items: center; gap: 14px; margin: 18px 0; }
+  .chip {
+    flex: 1; text-align: center; padding: 16px 10px; border-radius: 12px;
+    background: var(--panel2); border: 1px solid var(--border2); font-size: 17px; color: var(--soft);
+  }
+  .chip b { display: block; font-size: 21px; color: var(--main); margin-bottom: 5px; }
+  .chip small { color: var(--dim); font-size: 14px; }
+  .arrow { color: var(--sky); font-size: 26px; flex: none; }
+  .pulse { animation: chip-pulse 2s ease-in-out infinite; }
+  @keyframes chip-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); border-color: var(--border2); }
+    50% { box-shadow: 0 0 0 5px rgba(56, 189, 248, 0.18); border-color: var(--sky); }
+  }
+  .proj-row { display: flex; gap: 10px; margin-top: 18px; }
+  .proj {
+    flex: 1; padding: 14px 10px; border-radius: 10px; text-align: center;
+    background: var(--panel2); border: 1px solid var(--border); font-size: 15px; color: var(--soft);
+  }
+  .zip-anim {
+    display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 22px;
+  }
+  .zip-anim .file { width: 74px; height: 74px; }
+  .zip-anim .zip { width: 86px; height: 86px; }
+  .zip-anim path { fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .zip-anim .f1 path { stroke: var(--mid); }
+  .zip-anim .f2 path { stroke: var(--sky); }
+  .zip-anim .f3 path { stroke: var(--violet); }
+
+  /* ================= Scene 7: 主题与快捷键 ================= */
+  #s7 { gap: 46px; }
+  #s7 .theme-row { display: flex; align-items: center; gap: 44px; }
+  .theme-card {
+    width: 420px; height: 300px; border-radius: 18px; border: 1px solid var(--border2);
+    padding: 26px; display: flex; flex-direction: column; gap: 14px; overflow: hidden;
+  }
+  .theme-card.dark { background: #0f172a; }
+  .theme-card.light { background: #f1f5f9; border-color: #cbd5e1; }
+  .theme-card .t-bar { height: 12px; border-radius: 6px; }
+  .theme-card.dark .t-bar { background: #1e293b; }
+  .theme-card.light .t-bar { background: #e2e8f0; }
+  .theme-card .t-blocks { flex: 1; display: flex; gap: 12px; }
+  .theme-card .t-blocks div { flex: 1; border-radius: 10px; }
+  .theme-card.dark .t-blocks div { background: #1e293b; }
+  .theme-card.light .t-blocks div { background: #ffffff; border: 1px solid #e2e8f0; }
+  .theme-card .t-label { font-size: 22px; font-weight: 600; }
+  .theme-card.dark .t-label { color: #f1f5f9; }
+  .theme-card.light .t-label { color: #0f172a; }
+  .toggle {
+    width: 130px; height: 64px; border-radius: 999px; background: var(--panel2);
+    border: 1px solid var(--border2); position: relative; flex: none;
+  }
+  .toggle i {
+    position: absolute; width: 50px; height: 50px; border-radius: 50%; top: 6px; left: 8px;
+    background: var(--sky); transition: left 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  #s7.active .toggle i { animation: toggle-knob 2.6s ease-in-out infinite; }
+  @keyframes toggle-knob {
+    0%, 18% { left: 8px; }
+    45%, 70% { left: 70px; }
+    100% { left: 8px; }
+  }
+  #s7 .keys { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .key {
+    display: flex; align-items: center; gap: 9px; padding: 11px 20px; border-radius: 12px;
+    background: var(--panel); border: 1px solid var(--border2);
+  }
+  .key kbd {
+    font-family: inherit; font-size: 16px; color: var(--sky); background: var(--panel2);
+    border: 1px solid var(--border2); border-bottom-width: 3px; border-radius: 7px;
+    padding: 5px 10px;
+  }
+  .key span { font-size: 17px; color: var(--soft); }
+
+  /* ================= Scene 8: 局域网协作 ================= */
+  #s8 { gap: 40px; }
+  #s8 .collab-stage {
+    position: relative; width: 1120px; height: 480px;
+    background: var(--panel); border: 1px solid var(--border2); border-radius: 18px; overflow: hidden;
+  }
+  #s8 .collab-stage .inner {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(148, 163, 184, 0.14) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .cnode {
+    position: absolute; width: 200px; padding: 16px; text-align: center;
+    background: rgba(30, 41, 59, 0.96); border: 1px solid var(--border2); border-radius: 12px;
+  }
+  .cnode b { font-size: 19px; }
+  .cnode span { display: block; margin-top: 6px; font-size: 14px; color: var(--mid); }
+  .cnode.a { left: 90px; top: 80px; }
+  .cnode.b { left: 800px; top: 290px; }
+  .cnode.moved { animation: node-move 6.5s ease-in-out infinite; }
+  @keyframes node-move {
+    0%, 12% { transform: translate(0, 0); }
+    35%, 60% { transform: translate(430px, 130px); }
+    82%, 100% { transform: translate(0, 0); }
+  }
+  .cursor {
+    position: absolute; z-index: 5; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));
+  }
+  .cursor svg { width: 30px; height: 30px; display: block; }
+  .cursor .name {
+    font-size: 14px; padding: 3px 10px; border-radius: 999px; color: #fff;
+    margin: 4px 0 0 14px; width: fit-content; white-space: nowrap;
+  }
+  .cursor.u1 { left: 130px; top: 120px; animation: u1-path 6.5s ease-in-out infinite; }
+  .cursor.u1 .name { background: #0284c7; }
+  .cursor.u2 { left: 830px; top: 320px; animation: u2-path 6.5s ease-in-out infinite; }
+  .cursor.u2 .name { background: #7c3aed; }
+  @keyframes u1-path {
+    0%, 12% { transform: translate(0, 0); }
+    35%, 60% { transform: translate(430px, 130px); }
+    82%, 100% { transform: translate(0, 0); }
+  }
+  @keyframes u2-path {
+    0%, 15% { transform: translate(0, 0); }
+    40%, 65% { transform: translate(-320px, -60px); }
+    85%, 100% { transform: translate(0, 0); }
+  }
+  #s8 .relay {
+    position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 12px;
+    background: var(--panel2); border: 1px solid var(--border2);
+    padding: 12px 26px; border-radius: 999px; font-size: 18px; color: var(--soft);
+    animation: chip-pulse 2.4s ease-in-out infinite;
+  }
+  #s8 .relay .dot {
+    width: 12px; height: 12px; border-radius: 50%; background: var(--emerald);
+    box-shadow: 0 0 12px rgba(52, 211, 153, 0.9); flex: none;
+  }
+  #s8 .collab-feats { display: flex; gap: 16px; }
+  #s8 .collab-feats span {
+    font-size: 21px; padding: 12px 26px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--border2); color: var(--soft);
+  }
+
+  /* ================= Scene 9: 结尾 ================= */
+  #s9 .brand2 { font-size: 92px; font-weight: 800; letter-spacing: 3px; }
+  #s9 .slogan { margin-top: 30px; font-size: 40px; color: var(--soft); letter-spacing: 4px; }
+  #s9 .tech { margin-top: 44px; display: flex; gap: 14px; }
+  #s9 .tech span {
+    font-size: 17px; color: var(--mid); padding: 7px 18px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--border);
+  }
+  #s9 .footer { position: absolute; bottom: 60px; font-size: 20px; color: var(--dim); letter-spacing: 2px; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="bg-dots"></div>
+    <div class="bg-glow"></div>
+    <div class="vignette"></div>
+
+    <!-- Scene 1 开场 -->
+    <section class="scene" id="s1">
+      <div class="logo-mark anim-pop">
+        <svg viewBox="0 0 120 120" fill="none">
+          <rect x="10" y="10" width="100" height="100" rx="24" stroke="#1e293b" stroke-width="3" fill="#0f172a" />
+          <g class="logo-draw">
+            <path d="M34 38 Q60 14 86 38" stroke="#38bdf8" stroke-width="4" stroke-linecap="round" />
+            <path d="M34 60 Q60 82 86 60" stroke="#a78bfa" stroke-width="4" stroke-linecap="round" />
+            <path d="M34 82 Q60 58 86 82" stroke="#34d399" stroke-width="4" stroke-linecap="round" />
+          </g>
+          <circle cx="34" cy="38" r="6" fill="#38bdf8" />
+          <circle cx="86" cy="38" r="6" fill="#38bdf8" />
+          <circle cx="34" cy="60" r="6" fill="#a78bfa" />
+          <circle cx="86" cy="60" r="6" fill="#a78bfa" />
+          <circle cx="34" cy="82" r="6" fill="#34d399" />
+          <circle cx="86" cy="82" r="6" fill="#34d399" />
+        </svg>
+      </div>
+      <div class="brand grad-text anim d1">SuQCanvas</div>
+      <div class="tag anim d2">无限画布 · 万物皆可连线</div>
+      <div class="desc anim d3">把图片 · 视频 · 音频 · PDF · Markdown 拖进同一张画布</div>
+    </section>
+
+    <!-- Scene 2 无限画布 -->
+    <section class="scene" id="s2">
+      <div class="col-l">
+        <div class="pt anim">INFINITE CANVAS</div>
+        <h2 class="anim d1">无限画布<br /><span class="accent">随心缩放</span> 自由组织</h2>
+        <ul>
+          <li class="anim d2">滚轮缩放 · 中键平移视角</li>
+          <li class="anim d3">左键框选 · 拖动摆放</li>
+          <li class="anim d4">双击空白 新建文本</li>
+          <li class="anim d5">F 一键适应视图</li>
+        </ul>
+      </div>
+      <div class="canvas-mock anim-pop d2">
+        <div class="sel-rect"></div>
+        <div class="inner">
+          <div class="mock-node img">
+            <div class="bar"><b style="background:#38bdf8"></b>图片.png</div>
+            <div class="body"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5-11 11"/></svg></div>
+          </div>
+          <div class="mock-node video">
+            <div class="bar"><b style="background:#a78bfa"></b>演示.mp4</div>
+            <div class="body"><svg width="44" height="44" viewBox="0 0 24 24" fill="#94a3b8"><rect x="2" y="4" width="20" height="16" rx="3" fill="none" stroke="#94a3b8" stroke-width="1.6"/><path d="M10 9l5 3.5-5 3.5z"/></svg></div>
+          </div>
+          <div class="mock-node text">
+            <div class="bar"><b style="background:#34d399"></b>文本</div>
+            <div class="body">双击开始编辑…</div>
+          </div>
+          <div class="mock-node pdf">
+            <div class="bar"><b style="background:#fbbf24"></b>报告.pdf</div>
+            <div class="body">PDF 1 / 24</div>
+          </div>
+          <svg class="mock-edge" viewBox="0 0 220 210">
+            <path d="M10 10 C 130 30, 90 180, 210 200" />
+          </svg>
+        </div>
+        <div class="zoom-badge">120%</div>
+      </div>
+    </section>
+
+    <!-- Scene 3 多媒体元素 -->
+    <section class="scene" id="s3">
+      <div class="scene-title anim">拖入即用 · <span class="grad-text">多媒体元素</span></div>
+      <div class="cards">
+        <div class="mcard anim-pop d1">
+          <div class="icon ic-sky">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5-11 11"/></svg>
+          </div>
+          <h3>图片</h3><div class="f">PNG · JPG · GIF · WebP · SVG</div>
+          <p>任意格式直接拖入画布展示</p>
+        </div>
+        <div class="mcard anim-pop d2">
+          <div class="icon ic-violet">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="M10 9l5 3.5-5 3.5z" fill="currentColor" stroke="none"/></svg>
+          </div>
+          <h3>视频</h3><div class="f">MP4 · WebM · MOV</div>
+          <p>自动抽帧封面，离开视口自动卸载</p>
+        </div>
+        <div class="mcard anim-pop d3">
+          <div class="icon ic-emerald">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          </div>
+          <h3>音频</h3><div class="f">MP3 · WAV · OGG</div>
+          <p>内置播放器：进度 · 音量 · 静音</p>
+        </div>
+        <div class="mcard anim-pop d4">
+          <div class="icon ic-amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+          </div>
+          <h3>PDF</h3><div class="f">多页文档</div>
+          <p>首页缩略图 + 内置翻页查看器</p>
+        </div>
+        <div class="mcard anim-pop d5">
+          <div class="icon ic-sky">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V4h16v16z"/><path d="M7 16l4.5-6 3 4L16 12l3 4"/></svg>
+          </div>
+          <h3>Markdown</h3><div class="f">.md 文档</div>
+          <p>即时渲染，暗色排版优雅呈现</p>
+        </div>
+        <div class="mcard anim-pop d6">
+          <div class="icon ic-pink">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          </div>
+          <h3>纯文本</h3><div class="f">双击编辑</div>
+          <p>随手记录想法与备注</p>
+        </div>
+        <div class="mcard anim-pop d7">
+          <div class="icon ic-rose">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M13 2v7h7"/></svg>
+          </div>
+          <h3>其他文件</h3><div class="f">任意格式</div>
+          <p>统一显示为文件卡片</p>
+        </div>
+      </div>
+      <div class="hint anim d8">直接<b>拖拽文件</b>到画布，或 <b>Ctrl+V</b> 粘贴剪贴板图片</div>
+    </section>
+
+    <!-- Scene 5 MP3 播放器 -->
+    <section class="scene" id="s5">
+      <div class="scene-title anim">MP3 · <span class="grad-text">内置播放器</span></div>
+      <div class="scene-sub anim d1">音频拖入即播，画布内完成一切控制</div>
+      <div class="player-card anim-pop d2">
+        <div class="disc">
+          <div class="shine"></div>
+          <div class="center">SuQ<br />Music</div>
+          <div class="hole"></div>
+        </div>
+        <div class="player-info">
+          <div class="ptitle">旅行歌单 · 第 3 首.mp3</div>
+          <div class="partist">MP3 / WAV / OGG · 全格式支持</div>
+          <div class="eq"><span></span><span></span><span></span><span></span><span></span></div>
+          <div>
+            <div class="prog-wrap"><div class="prog-fill"></div></div>
+            <div class="time-row"><span>01:23</span><span>03:45</span></div>
+          </div>
+          <div class="ctl-row">
+            <div class="ctl-btn">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+            </div>
+            <div class="ctl-mini">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M19 5a9 9 0 0 1 0 14" /></svg>
+            </div>
+            <div class="vol-wrap"><div class="vol-fill"></div><div class="vol-dot"></div></div>
+            <div class="albums">
+              <div class="album a1"></div>
+              <div class="album a2"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="audio-feats">
+        <span class="anim d3">进度拖拽</span>
+        <span class="anim d4">音量调节 · 一键静音</span>
+        <span class="anim d5">旋转唱片动画</span>
+        <span class="anim d6">频谱均衡器</span>
+        <span class="anim d7">专辑封面轮播</span>
+      </div>
+    </section>
+
+    <!-- Scene 4 连线系统 -->
+    <section class="scene" id="s4">
+      <div class="scene-title anim">连线系统 · <span class="grad-text">组织你的想法</span></div>
+      <div class="scene-sub anim d1">从任意四边锚点拖出连线，关系一目了然</div>
+      <div class="edge-stage anim-pop d2">
+        <div class="inner"></div>
+        <svg class="lines" viewBox="0 0 1060 480">
+          <path d="M530 220 C 400 160, 280 130, 220 120" stroke="#38bdf8" stroke-dasharray="6 0" style="--len:320" />
+          <path d="M530 240 C 660 160, 780 130, 840 120" stroke="#a78bfa" stroke-dasharray="12 10" style="--len:340" />
+          <path d="M530 250 L 220 380 L 220 385" stroke="#34d399" stroke-dasharray="2 10" stroke-linecap="round" style="--len:480" />
+          <path d="M530 250 L 840 380" stroke="#fbbf24" stroke-dasharray="6 0" style="--len:360" />
+        </svg>
+        <div class="enode tl anim-pop d3"><b>图片</b><span>参考素材</span></div>
+        <div class="enode tr anim-pop d4"><b>视频</b><span>演示录像</span></div>
+        <div class="enode bl anim-pop d5"><b>笔记</b><span>想法记录</span></div>
+        <div class="enode br anim-pop d6"><b>PDF</b><span>研究报告</span></div>
+        <div class="enode c anim-pop d7"><b>中心主题</b><span>拖拽四边锚点连接</span></div>
+      </div>
+      <div class="tags">
+        <span class="anim d4"><i class="c-sky">实线</i> / <i class="c-violet">虚线</i> / <i class="c-emerald">点线</i></span>
+        <span class="anim d5">曲线 · 直线 · 阶梯 · 平滑阶梯</span>
+        <span class="anim d6">箭头：起点 / 终点 / 双向</span>
+        <span class="anim d7">颜色 · 粗细可调，选中后批量编辑</span>
+      </div>
+    </section>
+
+    <!-- Scene 6 数据安全 -->
+    <section class="scene" id="s6">
+      <div class="panel-box anim-pop d1">
+        <h2><span class="accent">本地优先</span> · 自动保存</h2>
+        <div class="box-sub">所有文件以 Blob 存入浏览器 IndexedDB</div>
+        <div class="flow">
+          <div class="chip"><b>画布内容</b><small>节点 · 连线</small></div>
+          <div class="arrow">→</div>
+          <div class="chip pulse"><b>IndexedDB</b><small>500ms 自动保存</small></div>
+        </div>
+        <div class="flow">
+          <div class="chip"><b>媒体文件</b><small>原文件 Blob</small></div>
+          <div class="arrow">→</div>
+          <div class="chip"><b>离线可用</b><small>数据不出浏览器</small></div>
+        </div>
+      </div>
+      <div class="panel-box anim-pop d3">
+        <h2>多项目管理 · <span class="accent">一键迁移</span></h2>
+        <div class="box-sub">新建 / 打开 / 重命名 / 删除，互不干扰</div>
+        <div class="proj-row">
+          <div class="proj">旅行计划</div>
+          <div class="proj">学习笔记</div>
+          <div class="proj">产品调研</div>
+        </div>
+        <div class="zip-anim">
+          <svg class="file f1" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6"/></svg>
+          <svg class="file f2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6"/></svg>
+          <div class="arrow">→</div>
+          <svg class="zip f3" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="15" rx="2"/><path d="M3 11h18M10 6V4a1.5 1.5 0 0 1 4 0v2"/></svg>
+        </div>
+        <div class="hint" style="text-align:center;font-size:17px;color:var(--dim);margin-top:18px">
+          导出 <b style="color:var(--sky)">.sqcanvas</b> 项目文件 · 任意浏览器导入还原
+        </div>
+      </div>
+    </section>
+
+    <!-- Scene 7 主题与快捷键 -->
+    <section class="scene" id="s7">
+      <div class="scene-title anim">双主题 · <span class="grad-text">高效快捷键</span></div>
+      <div class="theme-row">
+        <div class="theme-card dark anim-pop d1">
+          <div class="t-label">深色主题</div>
+          <div class="t-bar"></div>
+          <div class="t-blocks"><div></div><div></div><div></div></div>
+        </div>
+        <div class="toggle anim-pop d2"><i></i></div>
+        <div class="theme-card light anim-pop d3">
+          <div class="t-label">浅色主题</div>
+          <div class="t-bar"></div>
+          <div class="t-blocks"><div></div><div></div><div></div></div>
+        </div>
+      </div>
+      <div class="scene-sub anim d3">一键切换，偏好自动记忆</div>
+      <div class="keys">
+        <div class="key anim d4"><kbd>Ctrl</kbd><span>+</span><kbd>A</kbd><span>全选</span></div>
+        <div class="key anim d5"><kbd>Ctrl</kbd><span>+</span><kbd>D</kbd><span>复制选中</span></div>
+        <div class="key anim d6"><kbd>Ctrl</kbd><span>+</span><kbd>V</kbd><span>粘贴图片</span></div>
+        <div class="key anim d7"><kbd>F</kbd><span>适应视图</span></div>
+        <div class="key anim d8"><kbd>Del</kbd><span>删除选中</span></div>
+      </div>
+    </section>
+
+    <!-- Scene 8 局域网协作 -->
+    <section class="scene" id="s8">
+      <div class="scene-title anim">局域网 · <span class="grad-text">多人实时协作</span></div>
+      <div class="scene-sub anim d1">无需登录，同一房间同步画布、视口与素材</div>
+      <div class="collab-stage anim-pop d2">
+        <div class="inner"></div>
+        <div class="cnode a"><b>产品脑暴</b><span>一起整理思路</span></div>
+        <div class="cnode b moved"><b>素材整理</b><span>拖动分享布局</span></div>
+        <svg class="lines" viewBox="0 0 1120 480" style="position:absolute;inset:0;width:100%;height:100%">
+          <path d="M195 160 C 400 120, 700 280, 900 370" stroke="#38bdf8" stroke-width="3" fill="none" stroke-dasharray="6 6" />
+        </svg>
+        <div class="cursor u1">
+          <svg viewBox="0 0 24 24" fill="#0284c7" stroke="#fff" stroke-width="1.6"><path d="M4 2l16 8-7 2-3 8z"/></svg>
+          <div class="name">小明</div>
+        </div>
+        <div class="cursor u2">
+          <svg viewBox="0 0 24 24" fill="#7c3aed" stroke="#fff" stroke-width="1.6"><path d="M4 2l16 8-7 2-3 8z"/></svg>
+          <div class="name">小红</div>
+        </div>
+        <div class="relay"><span class="dot"></span>局域网中继 · ws://192.168.1.8:8790</div>
+      </div>
+      <div class="collab-feats">
+        <span class="anim d4">无需登录 · 填入地址即用</span>
+        <span class="anim d5">项目按房间隔离</span>
+        <span class="anim d6">持久保存到主机</span>
+      </div>
+    </section>
+
+    <!-- Scene 9 结尾 -->
+    <section class="scene" id="s9">
+      <div class="brand2 grad-text anim d1">SuQCanvas</div>
+      <div class="slogan anim d2">拖入文件 · 连起关系 · 自动保存</div>
+      <div class="tech anim d3">
+        <span>React 19</span><span>TypeScript</span><span>Vite</span>
+        <span>React Flow</span><span>IndexedDB</span><span>局域网协作</span>
+      </div>
+      <div class="footer anim d4">无限画布 · 万物皆可连线</div>
+    </section>
+
+    <div id="progress"></div>
+    <div id="hud">SuQCanvas</div>
+    <div id="dots"></div>
+  </div>
+
+  <script>
+    (function () {
+      var SCENES = [
+        { id: 's1', start: 0.6, dur: 5.4 },
+        { id: 's2', start: 6.0, dur: 7.5 },
+        { id: 's3', start: 13.5, dur: 9.5 },
+        { id: 's5', start: 23.0, dur: 7.5 },
+        { id: 's4', start: 30.5, dur: 7.5 },
+        { id: 's6', start: 38.0, dur: 7.5 },
+        { id: 's7', start: 45.5, dur: 6.5 },
+        { id: 's8', start: 52.0, dur: 6.5 },
+        { id: 's9', start: 58.5, dur: 5.0 }
+      ];
+      var TOTAL = 64.3;
+      var t0 = performance.now() + 500;
+
+      var dotsBox = document.getElementById('dots');
+      SCENES.forEach(function (s, i) {
+        var d = document.createElement('i');
+        d.dataset.i = i;
+        dotsBox.appendChild(d);
+      });
+
+      var progress = document.getElementById('progress');
+      var prev = -1;
+
+      function tick(now) {
+        var t = (now - t0) / 1000;
+        if (t < 0) { requestAnimationFrame(tick); return; }
+        progress.style.width = Math.min(100, (t / TOTAL) * 100) + '%';
+
+        var cur = -1;
+        for (var i = 0; i < SCENES.length; i++) {
+          if (t >= SCENES[i].start) cur = i;
+        }
+        if (cur !== prev) {
+          prev = cur;
+          SCENES.forEach(function (s, i) {
+            var el = document.getElementById(s.id);
+            el.classList.toggle('active', i === cur);
+          });
+          var ds = dotsBox.children;
+          for (var j = 0; j < ds.length; j++) {
+            ds[j].classList.toggle('on', j === cur);
+          }
+        }
+
+        if (t >= TOTAL + 0.8) {
+          document.body.classList.add('done');
+          return;
+        }
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    })();
+  </script>
+</body>
+</html>

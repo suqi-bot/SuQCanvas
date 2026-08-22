@@ -97,6 +97,8 @@ export interface SuqNodeData extends Record<string, unknown> {
 
 export interface SuqEdgeData extends Record<string, unknown> {
   style: EdgeStyle
+  /** 歌单分叉处的出边顺序,越小越先播放;未设置时按边的创建顺序(edges 数组顺序) */
+  order?: number
 }
 
 export type SuqNode = Node<SuqNodeData> & { data: SuqNodeData }

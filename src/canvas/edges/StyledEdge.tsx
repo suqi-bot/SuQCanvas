@@ -1,5 +1,6 @@
 import {
   BaseEdge,
+  EdgeLabelRenderer,
   getBezierPath,
   getSmoothStepPath,
   getStraightPath,
@@ -32,13 +33,15 @@ export function StyledEdge(props: EdgeProps<SuqEdge>) {
         : `${sw * 1.4} ${sw * 2.4}`
 
   let edgePath: string
+  let edgeLabelX = 0
+  let edgeLabelY = 0
   switch (style.pathType) {
     case 'straight': {
-      ;[edgePath] = getStraightPath({ sourceX, sourceY, targetX, targetY })
+      ;[edgePath, edgeLabelX, edgeLabelY] = getStraightPath({ sourceX, sourceY, targetX, targetY })
       break
     }
     case 'step': {
-      ;[edgePath] = getSmoothStepPath({
+      ;[edgePath, edgeLabelX, edgeLabelY] = getSmoothStepPath({
         sourceX,
         sourceY,
         sourcePosition,
@@ -50,7 +53,7 @@ export function StyledEdge(props: EdgeProps<SuqEdge>) {
       break
     }
     case 'smoothstep': {
-      ;[edgePath] = getSmoothStepPath({
+      ;[edgePath, edgeLabelX, edgeLabelY] = getSmoothStepPath({
         sourceX,
         sourceY,
         sourcePosition,
@@ -62,7 +65,7 @@ export function StyledEdge(props: EdgeProps<SuqEdge>) {
       break
     }
     default: {
-      ;[edgePath] = getBezierPath({
+      ;[edgePath, edgeLabelX, edgeLabelY] = getBezierPath({
         sourceX,
         sourceY,
         sourcePosition,
@@ -108,6 +111,19 @@ export function StyledEdge(props: EdgeProps<SuqEdge>) {
         markerEnd={markerEnd}
         interactionWidth={24}
       />
+      {data.order !== undefined && (
+        <EdgeLabelRenderer>
+          <div
+            title={`歌单播放顺序 ${data.order}`}
+            className="nodrag nopan pointer-events-none absolute z-10 flex h-4 min-w-4 items-center justify-center rounded-full bg-sky-500 px-1 text-[10px] font-bold leading-none text-white shadow"
+            style={{
+              transform: `translate(-50%, -50%) translate(${edgeLabelX}px, ${edgeLabelY}px)`,
+            }}
+          >
+            {data.order}
+          </div>
+        </EdgeLabelRenderer>
+      )}
     </>
   )
 }

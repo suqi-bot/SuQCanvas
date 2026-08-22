@@ -5,8 +5,9 @@ import { db } from '../../db/db'
 import { getAssetUrl } from '../../media/blobRegistry'
 import { useAssetUrl } from '../../media/useAssetUrl'
 import { registerAudio } from '../../media/mediaCoordinator'
+import { findPlaylistByAsset, linearizeFrom, resolvePlaylistsCached } from '../../media/playlists'
 import { usePlayerStore } from '../../store/playerStore'
-import { toast } from '../../store/uiStore'
+import { toast, useUiStore } from '../../store/uiStore'
 import { MediaNodeShell } from './MediaNodeShell'
 import { DownloadIcon, MuteIcon, PauseIcon, PlayIcon, VolumeIcon } from './Icons'
 import { useCanvasStore } from '../../store/canvasStore'
@@ -66,12 +67,34 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
 
   const playConnectedAudio = () => {
     const { edges, nodes } = useCanvasStore.getState()
-    const next = edges
-      .filter((edge) => edge.source === props.id)
-      .map((edge) => nodes.find((node) => node.id === edge.target))
-      .find((node) => node?.data.kind === 'audio')
-    if (!next) return
-    const target = audioRegistry.get(next.id)
+    const currentAssetId = props.data.assetId
+    if (!currentAssetId) return
+    // 优先按所属歌单的完整顺序续播(自歌单首节点线性化,支持分叉处回溯到另一支);
+    // 不属于任何歌单时,按本节点起的 DFS 先序取下一首
+    const playlist = findPlaylistByAsset(resolvePlaylistsCached(nodes, edges), currentAssetId)
+    const sequence = playlist
+      ? playlist.tracks
+      : linearizeFrom(nodes, edges, props.id).tracks
+    const pos = sequence.findIndex((track) => track.assetId === currentAssetId)
+    const nextTrack = pos >= 0 && pos < sequence.length - 1 ? sequence[pos + 1] : undefined
+    if (!nextTrack) return
+    // 优先播放歌单序列记录的那个节点;该节点未挂载(在视口外)时回退到同素材的已挂载节点
+    let target = audioRegistry.get(nextTrack.nodeId)
+    if (!target) {
+      const nodeIds = new Set(
+        nodes
+          .filter(
+            (node) => node.data.kind === 'audio' && node.data.assetId === nextTrack.assetId,
+          )
+          .map((node) => node.id),
+      )
+      for (const [nodeId, el] of audioRegistry) {
+        if (nodeIds.has(nodeId)) {
+          target = el
+          break
+        }
+      }
+    }
     if (!target) return
     // 切换下一首时从头开始播放
     target.currentTime = 0
@@ -96,8 +119,14 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
     // 始终播放/暂停本节点自身的音频，保证节点连接后的连续播放始终生效
     const audio = audioRef.current
     if (!audio) return
-    if (audio.paused) void audio.play()
-    else audio.pause()
+    if (audio.paused) {
+      // 播放器（track）接管同一首歌时，从全局进度接续播放，而不是从节点自身进度重播
+      const player = usePlayerStore.getState()
+      if (player.source === 'track' && player.track?.assetId === props.data.assetId) {
+        audio.currentTime = player.trackTime
+      }
+      void audio.play()
+    } else audio.pause()
   }
 
   const seek = (value: number) => {
@@ -155,7 +184,8 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
               if (!props.data.assetId) return
               const player = usePlayerStore.getState()
               player.setExternal({ assetId: props.data.assetId, name: props.data.label ?? '音频', element: e.currentTarget })
-              player.setBarVisible(true)
+              // 文件管理器（含播放器视图）打开时不弹出悬浮窗，避免覆盖在播放器上；播放器关闭时会自动恢复
+              if (!useUiStore.getState().fileManagerOpen) player.setBarVisible(true)
             }}
             onPause={() => setPlaying(false)}
             onEnded={() => {

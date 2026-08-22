@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, ForwardIcon, PauseIcon, PlayIcon, RewindIcon } from '../canvas/nodes/Icons'
 import { registerAudio } from '../media/mediaCoordinator'
-import { bindPlayerAudio, notifyPlayerEnded, usePlayerStore } from '../store/playerStore'
+import { findPlaylistByAsset, resolvePlaylistsCached } from '../media/playlists'
+import { bindPlayerAudio, notifyPlayerEnded, selectNowDuration, selectNowPlaying, selectNowTime, usePlayerStore } from '../store/playerStore'
+import { useCanvasStore } from '../store/canvasStore'
 import { useUiStore } from '../store/uiStore'
 
 function fmtTime(seconds: number): string {
@@ -18,10 +20,9 @@ export function GlobalPlayer() {
   const source = usePlayerStore((s) => s.source)
   const track = usePlayerStore((s) => s.track)
   const external = usePlayerStore((s) => s.external)
-  const trackPlaying = usePlayerStore((s) => s.trackPlaying)
-  const externalPlaying = usePlayerStore((s) => s.externalPlaying)
-  const currentTime = usePlayerStore((s) => s.currentTime)
-  const duration = usePlayerStore((s) => s.duration)
+  const playing = usePlayerStore(selectNowPlaying)
+  const currentTime = usePlayerStore(selectNowTime)
+  const duration = usePlayerStore(selectNowDuration)
   const volume = usePlayerStore((s) => s.volume)
   const muted = usePlayerStore((s) => s.muted)
   const barVisible = usePlayerStore((s) => s.barVisible)
@@ -85,9 +86,20 @@ export function GlobalPlayer() {
 
   const usingExternal = source === 'external' && external !== null
   const shown = barVisible && (track !== null || external !== null)
-  const playing = usingExternal ? externalPlaying : trackPlaying
 
   const name = usingExternal ? external!.name : (track?.name ?? '')
+  // 当前播放的歌曲所属的画布歌单名(多个歌单包含同一首歌时取第一个)
+  const canvasNodes = useCanvasStore((s) => s.nodes)
+  const canvasEdges = useCanvasStore((s) => s.edges)
+  const playlists = useMemo(
+    () => resolvePlaylistsCached(canvasNodes, canvasEdges),
+    [canvasNodes, canvasEdges],
+  )
+  const activeAssetId = usingExternal ? external?.assetId : track?.assetId
+  const playlistName = useMemo(
+    () => findPlaylistByAsset(playlists, activeAssetId)?.name,
+    [playlists, activeAssetId],
+  )
   const onOpenPlayer = () => {
     const player = usePlayerStore.getState()
     const assetId = player.source === 'external' ? player.external?.assetId : player.track?.assetId
@@ -123,7 +135,19 @@ export function GlobalPlayer() {
         ref={audioRef}
         src={track?.url}
         preload="metadata"
-        onPlay={() => usePlayerStore.setState({ trackPlaying: true })}
+        onPlay={(event) =>
+          usePlayerStore.setState((s) => ({
+            trackPlaying: true,
+            // 全局元素一旦真正开始播放，接管来源即切换为播放器，避免与画布节点状态错位
+            source: 'track',
+            trackTime: event.currentTarget.currentTime,
+            currentTime: event.currentTarget.currentTime,
+            duration:
+              Number.isFinite(event.currentTarget.duration) && event.currentTarget.duration > 0
+                ? event.currentTarget.duration
+                : s.duration,
+          }))
+        }
         onPause={() => usePlayerStore.setState({ trackPlaying: false })}
         onTimeUpdate={(event) => usePlayerStore.setState({ trackTime: event.currentTarget.currentTime, currentTime: event.currentTarget.currentTime })}
         onLoadedMetadata={(event) => usePlayerStore.setState({ trackDuration: event.currentTarget.duration, duration: event.currentTarget.duration })}
@@ -151,8 +175,11 @@ export function GlobalPlayer() {
                   type="button"
                   onClick={onOpenPlayer}
                   className="truncate text-xs font-medium hover:text-sky-400"
-                  title="打开音乐播放器"
+                  title={playlistName ? `打开音乐播放器(歌单「${playlistName}」)` : '打开音乐播放器'}
                 >
+                  {playlistName && (
+                    <span className="mr-1 text-[9px] font-normal text-sky-400/90">「{playlistName}」</span>
+                  )}
                   {name}
                 </button>
               </div>
@@ -167,7 +194,7 @@ export function GlobalPlayer() {
             <button type="button" title="快进 10 秒" className="rounded-full p-2 text-soft hover:bg-hover hover:text-main" onClick={() => onSeek(10)}><ForwardIcon /></button>
           </div>
           {!collapsed && (
-            <button type="button" title="停止并关闭" className="rounded-full p-2 text-soft hover:bg-hover hover:text-main" onClick={onClose}><CloseIcon /></button>
+            <button type="button" title="隐藏悬浮窗（音乐继续播放）" className="rounded-full p-2 text-soft hover:bg-hover hover:text-main" onClick={onClose}><CloseIcon /></button>
           )}
         </div>
       )}

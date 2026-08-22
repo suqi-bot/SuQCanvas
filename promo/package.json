@@ -1,0 +1,11 @@
+{
+  "name": "suqcanvas-promo-video",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "record": "node capture.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1"
+  }
+}

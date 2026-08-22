@@ -1,14 +1,24 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import type { SuqNode } from '../../types'
+import { resolvePlaylistsCached } from '../../media/playlists'
 import { useCanvasStore } from '../../store/canvasStore'
+import { useUiStore } from '../../store/uiStore'
 import { MediaNodeShell } from './MediaNodeShell'
+import { FlowIcon } from './Icons'
 import { buildTextStyle, V_JUSTIFY } from './textStyle'
 import { setLanEditing, clearLanEditing } from '../../sync/lanClient'
 
 export const TextNode = memo(function TextNode(props: NodeProps<SuqNode>) {
   const { id, data } = props
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
+  const nodes = useCanvasStore((s) => s.nodes)
+  const edges = useCanvasStore((s) => s.edges)
+  // 该文本节点是否命名了一个画布歌单(文本 → 单条出边 → 音频首节点)
+  const playlistTitle = useMemo(
+    () => resolvePlaylistsCached(nodes, edges).find((playlist) => playlist.titleNodeId === id) ?? null,
+    [nodes, edges, id],
+  )
   const [editing, setEditing] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -41,9 +51,29 @@ export const TextNode = memo(function TextNode(props: NodeProps<SuqNode>) {
   const textStyle = buildTextStyle(data)
   const vJustify = V_JUSTIFY[data.textAlignV ?? 'top']
 
+  const openPlaylist = () => {
+    if (!playlistTitle || playlistTitle.tracks.length === 0) return
+    useUiStore
+      .getState()
+      .openMusicPlayer(playlistTitle.tracks[0].assetId, true, playlistTitle.id)
+  }
+
   return (
     <MediaNodeShell node={props}>
-      <div className="flex h-full min-h-10 flex-col p-3" style={{ justifyContent: vJustify }}>
+      <div className="relative flex h-full min-h-10 flex-col p-3" style={{ justifyContent: vJustify }}>
+        {playlistTitle && !editing && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              openPlaylist()
+            }}
+            className="nodrag absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-full bg-sky-500/90 px-1.5 py-0.5 text-[9px] font-medium text-white shadow hover:bg-sky-500"
+            title={`歌单「${playlistTitle.name}」· ${playlistTitle.tracks.length} 首,点击播放`}
+          >
+            <FlowIcon className="h-2.5 w-2.5" /> 歌单
+          </button>
+        )}
         {editing ? (
           <textarea
             ref={textareaRef}

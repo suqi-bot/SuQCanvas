@@ -1,0 +1,591 @@
+{
+  "format": "sqcanvas",
+  "version": 1,
+  "project": {
+    "name": "SuQCanvas 灵感板"
+  },
+  "viewport": {
+    "x": 40,
+    "y": 60,
+    "zoom": 0.55
+  },
+  "nodes": [
+    {
+      "id": "n-h-main",
+      "type": "heading",
+      "position": {
+        "x": 60,
+        "y": 70
+      },
+      "width": 420,
+      "height": 64,
+      "data": {
+        "kind": "heading",
+        "level": 1,
+        "label": "标题 1",
+        "text": "SuQCanvas · 灵感板",
+        "borderColor": "#64748b"
+      }
+    },
+    {
+      "id": "n-img-1",
+      "type": "image",
+      "position": {
+        "x": 60,
+        "y": 220
+      },
+      "width": 480,
+      "height": 320,
+      "data": {
+        "kind": "image",
+        "assetId": "a-img-1",
+        "label": "灵感·山谷.jpg",
+        "fileSize": 102912,
+        "mime": "image/jpeg",
+        "borderColor": "#64748b"
+      }
+    },
+    {
+      "id": "n-img-2",
+      "type": "image",
+      "position": {
+        "x": 580,
+        "y": 220
+      },
+      "width": 480,
+      "height": 320,
+      "data": {
+        "kind": "image",
+        "assetId": "a-img-2",
+        "label": "灵感·峡谷.jpg",
+        "fileSize": 109324,
+        "mime": "image/jpeg",
+        "borderColor": "#64748b"
+      }
+    },
+    {
+      "id": "n-img-3",
+      "type": "image",
+      "position": {
+        "x": 1100,
+        "y": 220
+      },
+      "width": 480,
+      "height": 320,
+      "data": {
+        "kind": "image",
+        "assetId": "a-img-3",
+        "label": "灵感·湖泊.jpg",
+        "fileSize": 73741,
+        "mime": "image/jpeg",
+        "borderColor": "#64748b"
+      }
+    },
+    {
+      "id": "n-img-4",
+      "type": "image",
+      "position": {
+        "x": 1620,
+        "y": 220
+      },
+      "width": 480,
+      "height": 320,
+      "data": {
+        "kind": "image",
+        "assetId": "a-img-4",
+        "label": "灵感·晨雾.jpg",
+        "fileSize": 60795,
+        "mime": "image/jpeg",
+        "borderColor": "#64748b"
+      }
+    },
+    {
+      "id": "n-img-5",
+      "type": "image",
+      "position": {
+        "x": 60,
+        "y": 610
+      },
+      "width": 480,
+      "height": 320,
+      "data": {
+        "kind": "image",
+        "assetId": "a-img-5",
+        "label": "灵感·雪峰.jpg",
+        "fileSize": 78642,
+        "mime": "image/jpeg",
+        "borderColor": "#64748b"
+      }
+    },
+    {
+      "id": "n-img-6",
+      "type": "image",
+      "position": {
+        "x": 580,
+        "y": 610
+      },
+      "width": 480,
+      "height": 320,
+      "data": {
+        "kind": "image",
+        "assetId": "a-img-6",
+        "label": "灵感·森林.jpg",
+        "fileSize": 121731,
+        "mime": "image/jpeg",
+        "borderColor": "#64748b"
+      }
+    },
+    {
+      "id": "n-t-keywords",
+      "type": "text",
+      "position": {
+        "x": 1100,
+        "y": 610
+      },
+      "width": 480,
+      "height": 150,
+      "data": {
+        "kind": "text",
+        "label": "文本",
+        "text": "关键词\n极简 · 留白 · 克制的动效\n深色界面 · 本地优先",
+        "borderColor": "#38bdf8",
+        "fontSize": 16
+      }
+    },
+    {
+      "id": "n-t-quote",
+      "type": "text",
+      "position": {
+        "x": 1100,
+        "y": 800
+      },
+      "width": 480,
+      "height": 96,
+      "data": {
+        "kind": "text",
+        "label": "文本",
+        "text": "“好的产品，像一场安静的发布会。”",
+        "borderColor": "#f472b6",
+        "fontSize": 20,
+        "italic": true
+      }
+    },
+    {
+      "id": "n-md-notes",
+      "type": "markdown",
+      "position": {
+        "x": 1620,
+        "y": 610
+      },
+      "width": 480,
+      "height": 310,
+      "data": {
+        "kind": "markdown",
+        "assetId": "a-md",
+        "label": "产品介绍片·笔记.md",
+        "fileSize": 256,
+        "mime": "text/markdown",
+        "borderColor": "#a78bfa"
+      }
+    },
+    {
+      "id": "n-st-1",
+      "type": "sticky",
+      "position": {
+        "x": 60,
+        "y": 1030
+      },
+      "width": 200,
+      "height": 160,
+      "data": {
+        "kind": "sticky",
+        "color": "yellow",
+        "label": "便签",
+        "text": "周六前\n完成首版概念稿",
+        "borderColor": "#f59e0b",
+        "fontSize": 14
+      }
+    },
+    {
+      "id": "n-st-2",
+      "type": "sticky",
+      "position": {
+        "x": 300,
+        "y": 1030
+      },
+      "width": 200,
+      "height": 160,
+      "data": {
+        "kind": "sticky",
+        "color": "pink",
+        "label": "便签",
+        "text": "参考\nApple 发布会转场",
+        "borderColor": "#ec4899",
+        "fontSize": 14
+      }
+    },
+    {
+      "id": "n-st-3",
+      "type": "sticky",
+      "position": {
+        "x": 540,
+        "y": 1030
+      },
+      "width": 200,
+      "height": 160,
+      "data": {
+        "kind": "sticky",
+        "color": "blue",
+        "label": "便签",
+        "text": "配乐方向\n极简钢琴＋环境音",
+        "borderColor": "#3b82f6",
+        "fontSize": 14
+      }
+    },
+    {
+      "id": "n-sh-1",
+      "type": "shape",
+      "position": {
+        "x": 1100,
+        "y": 1020
+      },
+      "width": 180,
+      "height": 120,
+      "data": {
+        "kind": "shape",
+        "shape": "ellipse",
+        "label": "椭圆",
+        "text": "核心",
+        "fill": "#38bdf8",
+        "borderColor": "#0ea5e9",
+        "textAlign": "center",
+        "textAlignV": "middle",
+        "fontSize": 15
+      }
+    },
+    {
+      "id": "n-sh-2",
+      "type": "shape",
+      "position": {
+        "x": 1330,
+        "y": 1020
+      },
+      "width": 180,
+      "height": 120,
+      "data": {
+        "kind": "shape",
+        "shape": "rect",
+        "label": "矩形",
+        "text": "迭代",
+        "fill": "#a78bfa",
+        "borderColor": "#8b5cf6",
+        "textAlign": "center",
+        "textAlignV": "middle",
+        "fontSize": 15
+      }
+    },
+    {
+      "id": "n-au-1",
+      "type": "audio",
+      "position": {
+        "x": 780,
+        "y": 1085
+      },
+      "width": 280,
+      "height": 72,
+      "data": {
+        "kind": "audio",
+        "assetId": "a-audio",
+        "label": "ambient-demo.wav",
+        "fileSize": 1587678,
+        "mime": "audio/wav",
+        "borderColor": "#34d399"
+      }
+    },
+    {
+      "id": "n-vd-1",
+      "type": "video",
+      "position": {
+        "x": 1620,
+        "y": 240
+      },
+      "width": 480,
+      "height": 270,
+      "data": {
+        "kind": "video",
+        "assetId": "a-video",
+        "label": "demo-video.mp4",
+        "fileSize": 83502,
+        "mime": "video/mp4",
+        "borderColor": "#a78bfa"
+      }
+    },
+    {
+      "id": "n-fc-1",
+      "type": "fileCard",
+      "position": {
+        "x": 1620,
+        "y": 1020
+      },
+      "width": 260,
+      "height": 96,
+      "data": {
+        "kind": "file",
+        "assetId": "a-pdf",
+        "label": "产品介绍片脚本 v3.pdf",
+        "fileSize": 600,
+        "mime": "application/pdf",
+        "borderColor": "#94a3b8"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "n-h-main",
+      "target": "n-img-1",
+      "type": "styled",
+      "data": {
+        "style": {
+          "lineStyle": "solid",
+          "pathType": "bezier",
+          "arrow": "none",
+          "stroke": "#64748b",
+          "strokeWidth": 2
+        }
+      }
+    },
+    {
+      "id": "e2",
+      "source": "n-img-1",
+      "target": "n-t-keywords",
+      "type": "styled",
+      "data": {
+        "style": {
+          "lineStyle": "solid",
+          "pathType": "bezier",
+          "arrow": "end",
+          "stroke": "#38bdf8",
+          "strokeWidth": 2
+        }
+      }
+    },
+    {
+      "id": "e3",
+      "source": "n-img-2",
+      "target": "n-st-2",
+      "type": "styled",
+      "data": {
+        "style": {
+          "lineStyle": "solid",
+          "pathType": "bezier",
+          "arrow": "end",
+          "stroke": "#f472b6",
+          "strokeWidth": 2
+        }
+      }
+    },
+    {
+      "id": "e4",
+      "source": "n-img-3",
+      "target": "n-t-quote",
+      "type": "styled",
+      "data": {
+        "style": {
+          "lineStyle": "solid",
+          "pathType": "bezier",
+          "arrow": "end",
+          "stroke": "#34d399",
+          "strokeWidth": 2
+        }
+      }
+    },
+    {
+      "id": "e5",
+      "source": "n-img-5",
+      "target": "n-st-3",
+      "type": "styled",
+      "data": {
+        "style": {
+          "lineStyle": "solid",
+          "pathType": "bezier",
+          "arrow": "end",
+          "stroke": "#38bdf8",
+          "strokeWidth": 2
+        }
+      }
+    },
+    {
+      "id": "e6",
+      "source": "n-img-6",
+      "target": "n-fc-1",
+      "type": "styled",
+      "data": {
+        "style": {
+          "lineStyle": "solid",
+          "pathType": "bezier",
+          "arrow": "end",
+          "stroke": "#94a3b8",
+          "strokeWidth": 2
+        }
+      }
+    },
+    {
+      "id": "e7",
+      "source": "n-st-1",
+      "target": "n-t-keywords",
+      "type": "styled",
+      "data": {
+        "style": {
+          "lineStyle": "solid",
+          "pathType": "bezier",
+          "arrow": "end",
+          "stroke": "#fbbf24",
+          "strokeWidth": 2
+        }
+      }
+    },
+    {
+      "id": "e8",
+      "source": "n-t-keywords",
+      "target": "n-md-notes",
+      "type": "styled",
+      "data": {
+        "style": {
+          "lineStyle": "solid",
+          "pathType": "bezier",
+          "arrow": "end",
+          "stroke": "#64748b",
+          "strokeWidth": 2
+        }
+      }
+    },
+    {
+      "id": "e9",
+      "source": "n-md-notes",
+      "target": "n-sh-1",
+      "type": "styled",
+      "data": {
+        "style": {
+          "lineStyle": "solid",
+          "pathType": "bezier",
+          "arrow": "end",
+          "stroke": "#a78bfa",
+          "strokeWidth": 2
+        }
+      }
+    },
+    {
+      "id": "e10",
+      "source": "n-sh-1",
+      "target": "n-sh-2",
+      "type": "styled",
+      "data": {
+        "style": {
+          "lineStyle": "solid",
+          "pathType": "bezier",
+          "arrow": "end",
+          "stroke": "#94a3b8",
+          "strokeWidth": 2
+        }
+      }
+    },
+    {
+      "id": "e11",
+      "source": "n-t-quote",
+      "target": "n-st-1",
+      "type": "styled",
+      "data": {
+        "style": {
+          "lineStyle": "solid",
+          "pathType": "bezier",
+          "arrow": "end",
+          "stroke": "#fb7185",
+          "strokeWidth": 2
+        }
+      }
+    }
+  ],
+  "assets": [
+    {
+      "id": "a-img-1",
+      "name": "灵感·山谷.jpg",
+      "mime": "image/jpeg",
+      "size": 102912,
+      "kind": "image",
+      "hasThumbnail": false
+    },
+    {
+      "id": "a-img-2",
+      "name": "灵感·峡谷.jpg",
+      "mime": "image/jpeg",
+      "size": 109324,
+      "kind": "image",
+      "hasThumbnail": false
+    },
+    {
+      "id": "a-img-3",
+      "name": "灵感·湖泊.jpg",
+      "mime": "image/jpeg",
+      "size": 73741,
+      "kind": "image",
+      "hasThumbnail": false
+    },
+    {
+      "id": "a-img-4",
+      "name": "灵感·晨雾.jpg",
+      "mime": "image/jpeg",
+      "size": 60795,
+      "kind": "image",
+      "hasThumbnail": false
+    },
+    {
+      "id": "a-img-5",
+      "name": "灵感·雪峰.jpg",
+      "mime": "image/jpeg",
+      "size": 78642,
+      "kind": "image",
+      "hasThumbnail": false
+    },
+    {
+      "id": "a-img-6",
+      "name": "灵感·森林.jpg",
+      "mime": "image/jpeg",
+      "size": 121731,
+      "kind": "image",
+      "hasThumbnail": false
+    },
+    {
+      "id": "a-md",
+      "name": "产品介绍片·笔记.md",
+      "mime": "text/markdown",
+      "size": 256,
+      "kind": "markdown",
+      "hasThumbnail": false
+    },
+    {
+      "id": "a-pdf",
+      "name": "产品介绍片脚本 v3.pdf",
+      "mime": "application/pdf",
+      "size": 600,
+      "kind": "file",
+      "hasThumbnail": false
+    },
+    {
+      "id": "a-audio",
+      "name": "ambient-demo.wav",
+      "mime": "audio/wav",
+      "size": 1587678,
+      "kind": "audio",
+      "hasThumbnail": false
+    },
+    {
+      "id": "a-video",
+      "name": "demo-video.mp4",
+      "mime": "video/mp4",
+      "size": 83502,
+      "kind": "video",
+      "hasThumbnail": false
+    }
+  ]
+}
