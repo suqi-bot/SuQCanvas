@@ -221,6 +221,16 @@ export function AuthPage() {
         <p className="mt-2 text-center text-[11px] leading-relaxed text-dim">
           无需账号即可使用，项目数据仅保存在本设备
         </p>
+        <footer className="mt-8 text-center">
+          <a
+            href="https://beian.miit.gov.cn/"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-dim transition-colors hover:text-soft"
+          >
+            浙ICP备2026067784号-1
+          </a>
+        </footer>
       </div>
     </div>
   )

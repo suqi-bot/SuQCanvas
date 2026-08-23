@@ -345,7 +345,7 @@ export function InspectorPanel() {
   }
 
   return (
-    <aside className="absolute bottom-3 right-3 top-3 z-30 w-64 select-none overflow-y-auto rounded-xl border border-edge bg-panel/95 text-main shadow-2xl">
+    <aside className="no-scrollbar absolute bottom-3 right-3 top-3 z-30 w-64 select-none overflow-y-auto rounded-xl border border-edge bg-panel/95 text-main shadow-2xl">
       {selectedEdges.length > 0 && firstEdge && (
         <>
           <div className="flex items-center justify-between border-b border-edge px-3 py-2">

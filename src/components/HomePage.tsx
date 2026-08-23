@@ -4,6 +4,7 @@ import type { ProjectRecord } from '../db/db'
 import { useProjectStore } from '../store/projectStore'
 import { useUiStore, toast } from '../store/uiStore'
 import { useSettingsStore } from '../store/settingsStore'
+import { usePlayerStore } from '../store/playerStore'
 import { exportProjectToBlob, downloadBlob, importProjectFile } from '../io/importExport'
 import { useCanvasStore } from '../store/canvasStore'
 import { deleteProjectFromCloud, syncProjectList } from '../sync/cloudSync'
@@ -436,6 +437,10 @@ export function HomePage() {
   useEffect(() => {
     if (open && initialized) void refresh()
   }, [open, initialized, refresh, remoteProjects])
+
+  useEffect(() => {
+    if (open) usePlayerStore.getState().stop()
+  }, [open])
 
   const remoteIdSet = useMemo(() => new Set(remoteProjects.map((r) => r.id)), [remoteProjects])
 
