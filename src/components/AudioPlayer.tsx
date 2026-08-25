@@ -244,12 +244,19 @@ export function AudioPlayerView({
   const hue = palette?.hue ?? nameHue(current?.name ?? '')
   const accent = palette?.accent ?? '#38bdf8'
   const accentRgb = palette?.accentRgb ?? '56,189,248'
-  // 依背景主色亮度切换歌词颜色：亮背景用深色歌词、暗背景用浅色歌词，始终与背景对色
+  // 歌词与背景反色对色：色相取背景主色的反色(互补),明度强制与背景相反
   const darkBg = (palette?.luminance ?? 0.16) < 0.5
+  const lyricHue = Math.round((palette?.invertHue ?? 0) || (hue + 180) % 360)
   const lyricStyle = {
-    '--sq-lyric-base': darkBg ? '#ffffff' : `hsl(${Math.round(hue)} 46% 15%)`,
-    '--sq-lyric-soft': darkBg ? 'rgba(255,255,255,0.68)' : 'rgba(10,14,22,0.64)',
-    '--sq-lyric-dim': darkBg ? 'rgba(255,255,255,0.42)' : 'rgba(10,14,22,0.45)',
+    '--sq-lyric-base': darkBg
+      ? `hsl(${lyricHue} 58% 82%)`
+      : `hsl(${lyricHue} 52% 15%)`,
+    '--sq-lyric-soft': darkBg
+      ? `hsl(${lyricHue} 45% 78% / 0.78)`
+      : `hsl(${lyricHue} 42% 24% / 0.72)`,
+    '--sq-lyric-dim': darkBg
+      ? `hsl(${lyricHue} 42% 70% / 0.5)`
+      : `hsl(${lyricHue} 38% 18% / 0.48)`,
     '--sq-lyric-glow': darkBg
       ? `0 0 30px ${accent}4d, 0 2px 12px rgba(0,0,0,0.65)`
       : '0 2px 2px rgba(255,255,255,0.4), 0 2px 12px rgba(0,0,0,0.3)',

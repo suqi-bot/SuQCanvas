@@ -11,6 +11,8 @@ export interface CoverPalette {
   tintRgb: string
   /** 背景主色感知亮度（0..1），用于判断前景文字该用深色还是浅色 */
   luminance: number
+  /** 主色的反色色相（RGB 逐通道反色后求得）,用于前景文字与背景形成反色对色 */
+  invertHue: number
 }
 
 function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
@@ -142,12 +144,15 @@ export function extractCoverPalette(url: string): Promise<CoverPalette | null> {
         const sat = Math.max(0.6, Math.min(0.95, s))
         const light = Math.max(0.54, Math.min(0.66, l + 0.06))
         const accentRgb = hslToRgb(h, sat, light)
+        // 逐通道反色后的色相：与背景主色天然互补
+        const inv = rgbToHsl(255 - rr, 255 - gg, 255 - bb)
         resolve({
           hue: h,
           accent: `hsl(${Math.round(h)} ${Math.round(sat * 100)}% ${Math.round(light * 100)}%)`,
           accentRgb: `${accentRgb.r},${accentRgb.g},${accentRgb.b}`,
           tintRgb: `${Math.round(rr)},${Math.round(gg)},${Math.round(bb)}`,
           luminance: (rr * 0.299 + gg * 0.587 + bb * 0.114) / 255,
+          invertHue: inv.h,
         })
       } catch {
         resolve(null)
