@@ -9,6 +9,8 @@ export interface CoverPalette {
   accentRgb: string
   /** 主色 RGB 分量（用于背景着色，如 "r,g,b"） */
   tintRgb: string
+  /** 背景主色感知亮度（0..1），用于判断前景文字该用深色还是浅色 */
+  luminance: number
 }
 
 function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
@@ -145,6 +147,7 @@ export function extractCoverPalette(url: string): Promise<CoverPalette | null> {
           accent: `hsl(${Math.round(h)} ${Math.round(sat * 100)}% ${Math.round(light * 100)}%)`,
           accentRgb: `${accentRgb.r},${accentRgb.g},${accentRgb.b}`,
           tintRgb: `${Math.round(rr)},${Math.round(gg)},${Math.round(bb)}`,
+          luminance: (rr * 0.299 + gg * 0.587 + bb * 0.114) / 255,
         })
       } catch {
         resolve(null)

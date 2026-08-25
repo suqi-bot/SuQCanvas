@@ -596,14 +596,14 @@ body {
 }
 
 .sq-lyric-active {
-  color: #fff;
+  color: var(--sq-lyric-base, #fff);
   opacity: 1;
   transform: scale(1.02);
-  text-shadow: 0 0 30px color-mix(in srgb, var(--sq-accent, #38bdf8) 62%, transparent), 0 2px 12px rgba(0, 0, 0, 0.65);
+  text-shadow: var(--sq-lyric-glow, 0 0 30px rgba(56, 189, 248, 0.62));
 }
 
 .sq-lyric-dim {
-  color: rgba(255, 255, 255, 0.42);
+  color: var(--sq-lyric-dim, rgba(255, 255, 255, 0.42));
 }
 
 /* MP3 播放器：唱片纹理与高光 */
@@ -647,4 +647,19 @@ body {
 .sq-lyric-mask {
   mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 86%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 86%, transparent 100%);
+}
+
+/* 沉浸式播放器：歌词水中倒影（整体模糊 + 向下渐隐） */
+.sq-lyric-mirror {
+  overflow: hidden;
+  filter: blur(6px);
+  opacity: 0.34;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.12) 45%, transparent 70%);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.12) 45%, transparent 70%);
+}
+
+/* 倒影内层：纵向翻转，位置由 JS 随正像滚动同步 */
+.sq-lyric-mirror-inner {
+  transform: scaleY(-1);
+  transform-origin: top center;
 }

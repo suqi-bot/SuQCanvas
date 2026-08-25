@@ -168,6 +168,7 @@ export function AudioPlayerView({
   const currentTime = usePlayerStore((s) => s.time)
   const duration = usePlayerStore((s) => s.duration)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const mirrorRef = useRef<HTMLDivElement | null>(null)
   const lineRefs = useRef(new Map<number, HTMLButtonElement>())
   const freezeUntilRef = useRef(0)
 
@@ -243,6 +244,16 @@ export function AudioPlayerView({
   const hue = palette?.hue ?? nameHue(current?.name ?? '')
   const accent = palette?.accent ?? '#38bdf8'
   const accentRgb = palette?.accentRgb ?? '56,189,248'
+  // 依背景主色亮度切换歌词颜色：亮背景用深色歌词、暗背景用浅色歌词，始终与背景对色
+  const darkBg = (palette?.luminance ?? 0.16) < 0.5
+  const lyricStyle = {
+    '--sq-lyric-base': darkBg ? '#ffffff' : `hsl(${Math.round(hue)} 46% 15%)`,
+    '--sq-lyric-soft': darkBg ? 'rgba(255,255,255,0.68)' : 'rgba(10,14,22,0.64)',
+    '--sq-lyric-dim': darkBg ? 'rgba(255,255,255,0.42)' : 'rgba(10,14,22,0.45)',
+    '--sq-lyric-glow': darkBg
+      ? `0 0 30px ${accent}4d, 0 2px 12px rgba(0,0,0,0.65)`
+      : '0 2px 2px rgba(255,255,255,0.4), 0 2px 12px rgba(0,0,0,0.3)',
+  } as const
 
   const toggle = () => usePlayerStore.getState().toggle()
   const cycleMode = () => {
@@ -507,10 +518,25 @@ export function AudioPlayerView({
     container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
   }, [activeIndex])
 
+  // 歌词倒影与正像逐帧对齐：镜像内层 top = 当前滚动位置 + 可视高度（翻转轴贴正像底部）
+  const syncMirror = () => {
+    const src = scrollRef.current
+    const inner = mirrorRef.current
+    if (!src || !inner) return
+    inner.style.top = `${src.scrollTop + src.clientHeight}px`
+  }
+
+  useEffect(() => {
+    syncMirror()
+    window.addEventListener('resize', syncMirror)
+    return () => window.removeEventListener('resize', syncMirror)
+  }, [])
+
   useEffect(() => {
     lineRefs.current.clear()
     freezeUntilRef.current = 0
     scrollRef.current?.scrollTo({ top: 0 })
+    syncMirror()
   }, [lyrics])
 
   if (!current) {
@@ -520,7 +546,7 @@ export function AudioPlayerView({
   return (
     <div
       className="fixed inset-0 z-[100] overflow-hidden bg-app text-main"
-      style={{ '--sq-accent': accent } as CSSProperties}
+      style={{ '--sq-accent': accent, ...lyricStyle } as CSSProperties}
     >
       {/* 沉浸式水波纹背景（含 Web Audio 分析器） */}
       <AudioBackground coverUrl={coverUrl} playing={playing} hue={hue} tintRgb={palette?.tintRgb} />
@@ -729,7 +755,7 @@ export function AudioPlayerView({
 
             <div className="mt-10 w-full max-w-md px-2 text-center">
               <div className="flex items-center justify-center gap-2.5">
-                <h1 className="min-w-0 truncate text-2xl font-bold tracking-tight text-white sm:text-[1.8rem]" title={current.name}>
+                <h1 className="min-w-0 truncate text-2xl font-bold tracking-tight text-white sm:text-[1.8rem]" title={current.name} style={{ textShadow: '0 2px 16px rgba(0,0,0,0.55), 0 1px 3px rgba(0,0,0,0.4)' }}>
                   {current.name}
                 </h1>
                 <button
@@ -741,7 +767,7 @@ export function AudioPlayerView({
                   <DownloadIcon />
                 </button>
               </div>
-              <p className="mt-2 truncate text-[13px] text-white/60">
+              <p className="mt-2 truncate text-[13px] text-white/60" style={{ textShadow: '0 1px 10px rgba(0,0,0,0.5)' }}>
                 {(lyrics?.meta.ar || lyrics?.meta.artist) && (
                   <span className="text-white/85">{lyrics?.meta.ar ?? lyrics?.meta.artist}</span>
                 )}
@@ -767,52 +793,68 @@ export function AudioPlayerView({
 
           <section className="relative flex min-h-0 min-w-0 flex-1 flex-col pb-44 pl-2 pr-6 pt-20 lg:pt-16">
             <div className="mb-3 flex items-center gap-2 px-3">
-              <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/45">
+              <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--sq-lyric-soft)' }}>
                 <span className="h-3.5 w-0.5 rounded-full" style={{ background: accent }} />
                 歌词
               </span>
-              {lyricsSource && <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] text-white/60 backdrop-blur">{lyricsSource}</span>}
+              {lyricsSource && <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] backdrop-blur" style={{ color: 'var(--sq-lyric-soft)' }}>{lyricsSource}</span>}
               <div className="flex-1" />
               {lyrics?.kind === 'synced' && (
                 <div className="flex items-center gap-1">
-                  <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums text-white/55 hover:bg-white/10 hover:text-white" title="歌词提前 0.5 秒" onClick={() => updateLyricOffset((value) => value - 0.5)}>-0.5s</button>
+                  <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums hover:bg-white/10" style={{ color: 'var(--sq-lyric-soft)' }} title="歌词提前 0.5 秒" onClick={() => updateLyricOffset((value) => value - 0.5)}>-0.5s</button>
                   {lyricOffset !== 0 && <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums" style={{ color: accent }} title="重置歌词偏移" onClick={() => updateLyricOffset(() => 0)}>{lyricOffset > 0 ? '+' : ''}{lyricOffset.toFixed(1)}s</button>}
-                  <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums text-white/55 hover:bg-white/10 hover:text-white" title="歌词延后 0.5 秒" onClick={() => updateLyricOffset((value) => value + 0.5)}>+0.5s</button>
+                  <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums hover:bg-white/10" style={{ color: 'var(--sq-lyric-soft)' }} title="歌词延后 0.5 秒" onClick={() => updateLyricOffset((value) => value + 0.5)}>+0.5s</button>
                 </div>
               )}
             </div>
-            <div
-              ref={scrollRef}
-              onWheel={() => { freezeUntilRef.current = Date.now() + 3000 }}
-              onTouchMove={() => { freezeUntilRef.current = Date.now() + 3000 }}
-              className="sq-lyric-mask min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            >
-              {lyricsState === 'loading' && <div className="flex h-full items-center justify-center text-xs text-white/50">歌词加载中…</div>}
-              {lyricsState === 'ready' && lyrics?.kind === 'synced' && lyrics.lines.map((line, lineIndex) => (
-                <button
-                  key={lineIndex}
-                  ref={(el) => { if (el) lineRefs.current.set(lineIndex, el); else lineRefs.current.delete(lineIndex) }}
-                  type="button"
-                  onClick={() => seekTo(line.time)}
-                  title="点击跳转到该句"
-                  className={`sq-lyric block w-full rounded-md px-3 py-2.5 text-center leading-relaxed ${lineIndex === activeIndex ? 'sq-lyric-active text-xl font-semibold sm:text-2xl' : 'sq-lyric-dim text-sm sm:text-base'}`}
-                >
-                  {line.text || '\u00A0'}
-                </button>
-              ))}
-              {lyricsState === 'ready' && lyrics?.kind === 'unsynced' && (
-                <div className="space-y-2 px-3 py-2 text-center text-xs leading-6 text-white/70">
-                  {lyrics.lines.map((line, lineIndex) => <p key={lineIndex} className="whitespace-pre-wrap">{line.text || '\u00A0'}</p>)}
-                  <p className="pt-3 text-[10px] text-white/40">该歌曲只有未同步歌词，无法跟随播放滚动</p>
+            <div className="relative min-h-0 flex-1">
+              <div
+                ref={scrollRef}
+                onScroll={syncMirror}
+                onWheel={() => { freezeUntilRef.current = Date.now() + 3000 }}
+                onTouchMove={() => { freezeUntilRef.current = Date.now() + 3000 }}
+                className="sq-lyric-mask h-full overflow-y-auto overscroll-contain px-3 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              >
+                {lyricsState === 'loading' && <div className="flex h-full items-center justify-center text-xs" style={{ color: 'var(--sq-lyric-soft)' }}>歌词加载中…</div>}
+                {lyricsState === 'ready' && lyrics?.kind === 'synced' && lyrics.lines.map((line, lineIndex) => (
+                  <button
+                    key={lineIndex}
+                    ref={(el) => { if (el) lineRefs.current.set(lineIndex, el); else lineRefs.current.delete(lineIndex) }}
+                    type="button"
+                    onClick={() => seekTo(line.time)}
+                    title="点击跳转到该句"
+                    className={`sq-lyric block w-full rounded-md px-3 py-2.5 text-center leading-relaxed ${lineIndex === activeIndex ? 'sq-lyric-active text-xl font-semibold sm:text-2xl' : 'sq-lyric-dim text-sm sm:text-base'}`}
+                  >
+                    {line.text || '\u00A0'}
+                  </button>
+                ))}
+                {lyricsState === 'ready' && lyrics?.kind === 'unsynced' && (
+                  <div className="space-y-2 px-3 py-2 text-center text-xs leading-6" style={{ color: 'var(--sq-lyric-base)' }}>
+                    {lyrics.lines.map((line, lineIndex) => <p key={lineIndex} className="whitespace-pre-wrap">{line.text || '\u00A0'}</p>)}
+                    <p className="pt-3 text-[10px]" style={{ color: 'var(--sq-lyric-dim)' }}>该歌曲只有未同步歌词，无法跟随播放滚动</p>
+                  </div>
+                )}
+                {lyricsState === 'none' && (
+                  <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+                    <AudioIcon className="h-8 w-8" style={{ color: 'var(--sq-lyric-dim)' }} />
+                    <p className="text-xs" style={{ color: 'var(--sq-lyric-soft)' }}>暂无歌词</p>
+                    <p className="max-w-64 text-[11px] leading-relaxed" style={{ color: 'var(--sq-lyric-dim)' }}>导入 .lrc 文件并在画布上连线指向该歌曲即可作为歌词；内嵌歌词（ID3）的 MP3 自动识别</p>
+                  </div>
+                )}
+              </div>
+              {/* 歌词倒影：镜像翻转 + 整体模糊，滚动与正像同步，没入水面后被覆盖层压暗 */}
+              <div aria-hidden className="sq-lyric-mirror pointer-events-none absolute inset-x-0 top-full h-full">
+                <div ref={mirrorRef} className="sq-lyric-mirror-inner absolute inset-x-0">
+                  {lyricsState === 'ready' && lyrics?.kind === 'synced' && lyrics.lines.map((line, lineIndex) => (
+                    <div
+                      key={lineIndex}
+                      className={`sq-lyric block w-full rounded-md px-3 py-2.5 text-center leading-relaxed ${lineIndex === activeIndex ? 'sq-lyric-active text-xl font-semibold sm:text-2xl' : 'sq-lyric-dim text-sm sm:text-base'}`}
+                    >
+                      {line.text || '\u00A0'}
+                    </div>
+                  ))}
                 </div>
-              )}
-              {lyricsState === 'none' && (
-                <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-                  <AudioIcon className="h-8 w-8 text-white/30" />
-                  <p className="text-xs text-white/60">暂无歌词</p>
-                  <p className="max-w-64 text-[11px] leading-relaxed text-white/40">导入 .lrc 文件并在画布上连线指向该歌曲即可作为歌词；内嵌歌词（ID3）的 MP3 自动识别</p>
-                </div>
-              )}
+              </div>
             </div>
           </section>
         </div>
