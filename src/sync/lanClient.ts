@@ -66,6 +66,55 @@ let applyingRemote = false
 let syncTimer: ReturnType<typeof setTimeout> | null = null
 let vpTimer: ReturnType<typeof setTimeout> | null = null
 
+// ---- 显式删除传播（并集合并的配套机制） ----
+// 接收端改为按 id 并集合并后，快照不再表达「删除」，被删除的节点/连线
+// 单独以 sync-del 消息广播；删除后 TOMBSTONE_MS 内该 id 记为墓碑，
+// 晚到的旧快照即使包含它也不会被复活（id 由 genId 生成、不重复，
+// 窗口期内「删除优先」不会误伤真正的重建）。
+const TOMBSTONE_MS = 60_000
+const tombstones = new Map<string, number>()
+
+function isTombstoned(id: string): boolean {
+  const expiry = tombstones.get(id)
+  if (expiry === undefined) return false
+  if (Date.now() > expiry) {
+    tombstones.delete(id)
+    return false
+  }
+  return true
+}
+
+function stampTombstone(id: string): void {
+  tombstones.set(id, Date.now() + TOMBSTONE_MS)
+}
+
+function clearTombstones(): void {
+  tombstones.clear()
+}
+
+// 批量删除调度：一次删除动作（如删除选区）合并成一条消息快速发出
+let delTimer: ReturnType<typeof setTimeout> | null = null
+const pendingDeletes: { nodeIds: string[]; edgeIds: string[] } = { nodeIds: [], edgeIds: [] }
+
+function scheduleSyncDel(nodeIds: string[], edgeIds: string[]): void {
+  if (!isLanConnected() || applyingRemote || !useLanStore.getState().activeProjectId) return
+  // 本端也立墓碑：防止自己在删除后收到含该 id 的晚到旧快照而复活
+  for (const id of nodeIds) stampTombstone(id)
+  for (const id of edgeIds) stampTombstone(id)
+  pendingDeletes.nodeIds.push(...nodeIds)
+  pendingDeletes.edgeIds.push(...edgeIds)
+  if (delTimer) return
+  delTimer = setTimeout(() => {
+    delTimer = null
+    const nodeIds = pendingDeletes.nodeIds
+    const edgeIds = pendingDeletes.edgeIds
+    pendingDeletes.nodeIds = []
+    pendingDeletes.edgeIds = []
+    if ((nodeIds.length === 0 && edgeIds.length === 0) || !isLanConnected()) return
+    roomSend('sync-del', { nodeIds, edgeIds })
+  }, 80)
+}
+
 // ---- 断线自动重连 ----
 const RECONNECT_BASE_MS = 1000
 const RECONNECT_MAX_MS = 15000
@@ -397,27 +446,72 @@ function handleMessage(msg: LanMessage): void {
     case 'sync': {
       if (msg.from === lan.selfId) return
       if (msg.projectId && msg.projectId !== lan.activeProjectId) return
-      const nodes = (msg.nodes as SuqNode[]) ?? []
-      const edges = (msg.edges as SuqEdge[]) ?? []
+      const remoteNodes = (msg.nodes as SuqNode[]) ?? []
+      const remoteEdges = (msg.edges as SuqEdge[]) ?? []
       applyingRemote = true
       try {
-        // 保留本地选中状态，远端变更不触发选中闪烁
+        // 按 id 并集合并：远端节点覆盖同名字段，本地独有节点保留。
+        // 多人并发导入时各自的新节点不再被对方早到的快照整幅"抹掉"；
+        // 删除由 sync-del 显式传播，普通快照不再隐式删除。
         const sel = new Set(useCanvasStore.getState().nodes.filter((n) => n.selected).map((n) => n.id))
-        useCanvasStore.setState({
-          nodes: nodes.map((n) => (sel.has(n.id) ? { ...n, selected: true } : n)),
-          edges,
-        })
+        const remoteById = new Map<string, SuqNode>()
+        for (const n of remoteNodes) {
+          if (!isTombstoned(n.id)) remoteById.set(n.id, n)
+        }
+        const mergedNodes: SuqNode[] = []
+        for (const n of useCanvasStore.getState().nodes) {
+          const r = remoteById.get(n.id)
+          if (r) remoteById.delete(n.id)
+          const pick = r ?? n
+          mergedNodes.push(sel.has(pick.id) ? { ...pick, selected: true } : pick)
+        }
+        for (const r of remoteById.values()) {
+          mergedNodes.push(sel.has(r.id) ? { ...r, selected: true } : r)
+        }
+        const remoteEdgeById = new Map(remoteEdges.map((e) => [e.id, e]))
+        const mergedEdges: SuqEdge[] = []
+        for (const e of useCanvasStore.getState().edges) {
+          if (isTombstoned(e.id)) continue
+          const r = remoteEdgeById.get(e.id)
+          if (r) remoteEdgeById.delete(e.id)
+          mergedEdges.push(r ?? e)
+        }
+        for (const r of remoteEdgeById.values()) {
+          if (!isTombstoned(r.id)) mergedEdges.push(r)
+        }
+        useCanvasStore.setState({ nodes: mergedNodes, edges: mergedEdges })
       } finally {
         applyingRemote = false
       }
       // 远端节点引用的素材若本地缺失，向局域网拉取
-      for (const n of nodes) {
+      for (const n of remoteNodes) {
         const assetId = n.data?.assetId
         if (!assetId) continue
         if (assetWaiters.has(assetId) || pendingAssets.has(assetId)) continue
         void db.assets.get(assetId).then((rec) => {
           if (!rec && assetWaiters.has(assetId) === false) void requestAssetFromLan(assetId)
         })
+      }
+      break
+    }
+    case 'sync-del': {
+      if (msg.from === lan.selfId) return
+      if (msg.projectId && msg.projectId !== lan.activeProjectId) return
+      const nodeIds = (msg.nodeIds as string[] | undefined) ?? []
+      const edgeIds = (msg.edgeIds as string[] | undefined) ?? []
+      if (nodeIds.length === 0 && edgeIds.length === 0) break
+      for (const id of nodeIds) stampTombstone(id)
+      for (const id of edgeIds) stampTombstone(id)
+      const removeN = new Set(nodeIds)
+      const removeE = new Set(edgeIds)
+      applyingRemote = true
+      try {
+        useCanvasStore.setState((state) => ({
+          nodes: state.nodes.filter((n) => !removeN.has(n.id)),
+          edges: state.edges.filter((e) => !removeE.has(e.id)),
+        }))
+      } finally {
+        applyingRemote = false
       }
       break
     }
@@ -519,6 +613,21 @@ function scheduleViewportBroadcast(): void {
 export function initLanSync(): () => void {
   const unsub = useCanvasStore.subscribe((state, prev) => {
     if (state.nodes !== prev.nodes || state.edges !== prev.edges) {
+      // 显式删除传播：被移除的节点/连线立即广播 sync-del
+      // （并集合并后快照不再隐式表达删除，否则对方会永远保留）
+      const removedNodeIds = prev.nodes
+        .filter((n) => !state.nodes.some((x) => x.id === n.id))
+        .map((n) => n.id)
+      const removedEdgeIds = prev.edges
+        .filter((e) => !state.edges.some((x) => x.id === e.id))
+        .map((e) => e.id)
+      if (removedNodeIds.length > 0 || removedEdgeIds.length > 0) {
+        scheduleSyncDel(removedNodeIds, removedEdgeIds)
+      }
+      // 本地复活（撤销删除）的 id 解除墓碑，重新参与同步
+      for (const n of state.nodes) {
+        if (!prev.nodes.some((x) => x.id === n.id)) tombstones.delete(n.id)
+      }
       scheduleSyncBroadcast()
       if (!previousGraph) previousGraph = { nodes: prev.nodes, edges: prev.edges }
       const nodesChanged = state.nodes.length !== prev.nodes.length
@@ -557,6 +666,7 @@ export function joinLanProject(projectId: string): void {
   lan.clearCollaborationState()
   lan.setFollowId(null)
   lan.clearRemoteViewport()
+  clearTombstones()
   if (isLanConnected()) send({ t: 'join-project', projectId })
 }
 
@@ -566,6 +676,7 @@ export function leaveLanProject(): void {
   lan.setFollowId(null)
   lan.clearRemoteViewport()
   lan.clearCollaborationState()
+  clearTombstones()
   if (isLanConnected()) send({ t: 'leave-project' })
 }
 

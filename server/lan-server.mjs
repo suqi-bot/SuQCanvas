@@ -398,6 +398,7 @@ wss.on('connection', (ws, req) => {
 
     if (
       msg.t === 'sync' ||
+      msg.t === 'sync-del' ||
       msg.t === 'viewport' ||
       msg.t === 'cursor' ||
       msg.t === 'editing' ||

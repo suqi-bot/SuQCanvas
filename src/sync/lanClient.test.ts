@@ -4,9 +4,11 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebSocket } from 'ws'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { db } from '../db/db'
+import { useCanvasStore } from '../store/canvasStore'
 import { useLanStore } from '../store/lanStore'
+import type { SuqNode } from '../types'
 import {
   getDefaultLanUrl,
   joinLanProject,
@@ -218,6 +220,57 @@ describe('LAN 协作项目', () => {
     A.off('message', listener)
     other.close()
     expect(leaked).toBe(false)
+  })
+})
+
+describe('LAN 画布并集合并与显式删除', () => {
+  const node = (id: string, label = id): SuqNode => ({
+    id,
+    type: 'text',
+    position: { x: 0, y: 0 },
+    data: { kind: 'text', label },
+  })
+
+  beforeEach(() => {
+    useCanvasStore.getState().reset()
+    useCanvasStore.getState().clearHistory()
+  })
+
+  it('并集合并：本地与远端节点共存，同名节点以远端为准', async () => {
+    useCanvasStore.getState().addNodes([node('n-local'), node('n-shared', '本地')])
+    A.send(
+      JSON.stringify({
+        t: 'sync',
+        projectId: 'test-project',
+        nodes: [node('n-remote'), node('n-shared', '远端更新')],
+        edges: [],
+      }),
+    )
+    await waitFor(() => useCanvasStore.getState().nodes.some((n) => n.id === 'n-remote'), 3000)
+    const ids = useCanvasStore.getState().nodes.map((n) => n.id)
+    expect(ids).toContain('n-local')
+    expect(ids).toContain('n-remote')
+    expect(useCanvasStore.getState().nodes.find((n) => n.id === 'n-shared')?.data.label).toBe('远端更新')
+  })
+
+  it('显式删除：sync-del 移除对应节点，晚到的旧快照不会复活它', async () => {
+    useCanvasStore.getState().addNodes([node('n-a'), node('n-b')])
+    A.send(JSON.stringify({ t: 'sync-del', projectId: 'test-project', nodeIds: ['n-a'], edgeIds: [] }))
+    await waitFor(() => !useCanvasStore.getState().nodes.some((n) => n.id === 'n-a'), 3000)
+    expect(useCanvasStore.getState().nodes.some((n) => n.id === 'n-b')).toBe(true)
+    // 删除后的墓碑窗口内,晚到的旧快照即使包含 n-a 也不应复活它
+    A.send(
+      JSON.stringify({
+        t: 'sync',
+        projectId: 'test-project',
+        nodes: [node('n-a'), node('n-c')],
+        edges: [],
+      }),
+    )
+    await waitFor(() => useCanvasStore.getState().nodes.some((n) => n.id === 'n-c'), 3000)
+    const nodes = useCanvasStore.getState().nodes
+    expect(nodes.some((n) => n.id === 'n-a')).toBe(false)
+    expect(nodes.some((n) => n.id === 'n-b')).toBe(true)
   })
 })
 
