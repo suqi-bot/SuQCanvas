@@ -102,11 +102,11 @@ function VideoPlayerPage() {
       {/* 氛围背景：封面缩略图模糊铺满 + 上下渐变 */}
       <div className="absolute inset-0" aria-hidden>
         {poster ? (
-          <img src={poster} alt="" className="h-full w-full scale-110 object-cover opacity-35 blur-2xl" draggable={false} />
+          <img src={poster} alt="" className="h-full w-full scale-110 object-cover opacity-50 blur-2xl" draggable={false} />
         ) : (
           <div className="h-full w-full bg-gradient-to-b from-[#0a0f1a] to-[#04060a]" />
         )}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/25 via-transparent to-black/65" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/5 to-black/55" />
       </div>
 
       {/* 顶栏 */}
@@ -143,8 +143,8 @@ function VideoPlayerPage() {
         </button>
       </header>
 
-      {/* 视频区 */}
-      <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center px-6 pb-16">
+      {/* 视频区：占满剩余区域，按比例缩放填充 */}
+      <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center px-6 pb-14 pt-4">
         {url ? (
           <video
             ref={videoRef}
@@ -153,7 +153,7 @@ function VideoPlayerPage() {
             autoPlay
             playsInline
             draggable={false}
-            className="max-h-full max-w-full rounded-xl bg-black shadow-2xl"
+            className="h-full w-full object-contain"
           />
         ) : (
           <div className="flex flex-col items-center gap-3">
