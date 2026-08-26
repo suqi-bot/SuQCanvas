@@ -1,4 +1,4 @@
-import { memo, useRef } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { NodeResizer, type NodeProps } from '@xyflow/react'
 import type { SuqNode } from '../../types'
 import { useAssetUrl } from '../../media/useAssetUrl'
@@ -20,7 +20,13 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
     Object.values(s.editing).find((item) => item.nodeId === props.id && item.userId !== s.selfId),
   )
   const fittedRef = useRef(false)
+  // 图片加载完成的淡入状态:局域网分片传输期间占位层缓闪,内容到达后跨淡入
+  const [loaded, setLoaded] = useState(false)
   const filename = props.data.label ?? '图片'
+
+  useEffect(() => {
+    setLoaded(false)
+  }, [url])
 
   const openImage = () => {
     if (!url || !props.data.assetId) {
@@ -69,17 +75,22 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
           openImage()
         }}
       >
-        {url ? (
-          <img
-            src={url}
-            alt={props.data.label ?? ''}
-            draggable={false}
-            onLoad={handleLoad}
-            className="max-h-full max-w-full rounded object-contain"
+          {/* 占位层:加载中脉动,图片到达后与图片交叉淡出 */}
+          <div
+            className={`absolute h-16 w-16 rounded bg-hover/60 transition-opacity duration-300 ${url ? (loaded ? 'opacity-0' : 'animate-pulse opacity-100') : 'animate-pulse opacity-100'}`}
           />
-        ) : (
-          <div className="h-16 w-16 animate-pulse rounded bg-hover/60" />
-        )}
+          {url && (
+            <img
+              src={url}
+              alt={props.data.label ?? ''}
+              draggable={false}
+              onLoad={(e) => {
+                setLoaded(true)
+                handleLoad(e)
+              }}
+              className={`relative max-h-full max-w-full rounded object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+            />
+          )}
         <div className="nodrag absolute right-2 top-2 flex gap-1 rounded-md border border-edge bg-panel/90 p-1 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
           <button
             type="button"

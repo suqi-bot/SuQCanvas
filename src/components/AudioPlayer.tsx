@@ -37,6 +37,26 @@ import type { SuqNode } from '../types'
 
 const LYRIC_OFFSET_KEY = 'suqcanvas:lyricOffsets'
 const LIKED_KEY = 'suqcanvas:likedSongs'
+const LYRIC_MODE_KEY = 'suqcanvas:lyricTextMode'
+
+type LyricTextMode = 'auto' | 'light' | 'dark'
+
+function loadLyricMode(): LyricTextMode {
+  try {
+    const value = localStorage.getItem(LYRIC_MODE_KEY)
+    return value === 'light' || value === 'dark' ? value : 'auto'
+  } catch {
+    return 'auto'
+  }
+}
+
+function saveLyricMode(mode: LyricTextMode): void {
+  try {
+    localStorage.setItem(LYRIC_MODE_KEY, mode)
+  } catch {
+    // ignore
+  }
+}
 
 function loadLyricOffset(assetId: string): number {
   try {
@@ -161,6 +181,8 @@ export function AudioPlayerView({
   const [lyricsSource, setLyricsSource] = useState<string>()
   const [lyricsState, setLyricsState] = useState<'loading' | 'ready' | 'none'>('loading')
   const [lyricOffset, setLyricOffset] = useState(0)
+  // 歌词文字颜色模式：自动(按背景对比度)/浅色白字/深色深灰字，手动模式兜底
+  const [lyricMode, setLyricMode] = useState<LyricTextMode>(loadLyricMode)
   const [albumUrls, setAlbumUrls] = useState<string[]>([])
   const [albumIndex, setAlbumIndex] = useState(0)
   const [liked, setLiked] = useState(false)
@@ -259,6 +281,9 @@ export function AudioPlayerView({
   // bgLum 取自封面歌词区(上半屏 cover-fit 裁剪)的像素均值亮度,无封面回退深色渐变 → 白字
   const bgLum = palette?.bgLum ?? 0.03
   const darkText = useMemo(() => {
+    // 手动模式覆盖自动选择（自动偶尔翻车时可扳回）
+    if (lyricMode === 'dark') return true
+    if (lyricMode === 'light') return false
     const whiteRatio = contrastRatio(bgLum, 1)
     const darkRatio = contrastRatio(bgLum, 0)
     let next = darkTextRef.current
@@ -266,7 +291,7 @@ export function AudioPlayerView({
     else if (!next && darkRatio > whiteRatio * 1.15) next = true
     darkTextRef.current = next
     return next
-  }, [bgLum])
+  }, [bgLum, lyricMode])
   // 歌词始终带描边 + 柔光兜底：即使明度判断翻车，文字也保持轮廓可读
   const lyricStyle = {
     '--sq-lyric-base': darkText
@@ -931,6 +956,19 @@ export function AudioPlayerView({
               </span>
               {lyricsSource && <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] backdrop-blur" style={{ color: 'var(--sq-lyric-soft)' }}>{lyricsSource}</span>}
               <div className="flex-1" />
+              <button
+                type="button"
+                onClick={() => {
+                  const next = lyricMode === 'auto' ? 'light' : lyricMode === 'light' ? 'dark' : 'auto'
+                  setLyricMode(next)
+                  saveLyricMode(next)
+                }}
+                className="rounded px-1.5 py-0.5 text-[10px] tabular-nums hover:bg-white/10"
+                style={{ color: 'var(--sq-lyric-soft)' }}
+                title="歌词文字颜色：自动（按背景对比度选择）/ 浅色（白字）/ 深色（深灰字）"
+              >
+                {lyricMode === 'auto' ? '自动' : lyricMode === 'light' ? '浅色' : '深色'}
+              </button>
               {lyrics?.kind === 'synced' && (
                 <div className="flex items-center gap-1">
                   <button type="button" className="rounded px-1.5 py-0.5 text-[10px] tabular-nums hover:bg-white/10" style={{ color: 'var(--sq-lyric-soft)' }} title="歌词提前 0.5 秒" onClick={() => updateLyricOffset((value) => value - 0.5)}>-0.5s</button>

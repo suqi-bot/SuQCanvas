@@ -253,7 +253,13 @@ export function lanConnect(url: string, name: string, opts: { isReconnect?: bool
     useLanStore.setState({ status: 'connected', followId: null, remoteViewport: null })
     send({ t: 'hello', name })
     const activeProjectId = useLanStore.getState().activeProjectId
-    if (activeProjectId) send({ t: 'join-project', projectId: activeProjectId })
+    if (activeProjectId) {
+      send({ t: 'join-project', projectId: activeProjectId })
+      // 重连对账:离线期间可能错过了 sync-del 删除,本地会残留已删除的节点。
+      // 拉取中继保存的项目快照,project-data 处理按 updatedAt 比较:
+      // 仅当远端更新时整幅替换(删除收敛),本地有更新的离线编辑不被覆盖。
+      void fetchProjectFromLan(activeProjectId)
+    }
     toast(opts.isReconnect ? '已恢复局域网协作连接' : '已连接局域网协作', 'success')
     // 加入后请求当前画布引用的素材
     const nodes = useCanvasStore.getState().nodes
@@ -552,7 +558,7 @@ function handleMessage(msg: LanMessage): void {
 let lastSyncPayload: { nodes: SuqNode[]; edges: SuqEdge[]; viewport: Viewport } | null = null
 let previousGraph: { nodes: SuqNode[]; edges: SuqEdge[] } | null = null
 let activityTimer: ReturnType<typeof setTimeout> | null = null
-let pendingActivity: { kind: LanActivityKind; message: string; nodeId?: string } | null = null
+let pendingActivity: { kind: LanActivityKind; message: string; nodeId?: string; count?: number } | null = null
 
 function stripSelected(nodes: SuqNode[]): SuqNode[] {
   return nodes.map((n) => (n.selected ? { ...n, selected: false } : n))
@@ -579,6 +585,17 @@ function scheduleSyncBroadcast(): void {
 
 function scheduleActivity(kind: LanActivityKind, message: string, nodeId?: string): void {
   if (!isLanConnected() || applyingRemote || !useLanStore.getState().activeProjectId) return
+  // 批量操作(如连续导入的逐个新增)在防抖窗口内合并为一条通知,避免刷屏
+  if (
+    pendingActivity &&
+    (kind === 'create' || kind === 'delete') &&
+    pendingActivity.kind === kind
+  ) {
+    pendingActivity.count = (pendingActivity.count ?? 1) + 1
+    pendingActivity.message =
+      kind === 'create' ? `新增 ${pendingActivity.count} 个节点` : `删除 ${pendingActivity.count} 个节点`
+    return
+  }
   pendingActivity = { kind, message, nodeId }
   if (activityTimer) return
   activityTimer = setTimeout(() => {
