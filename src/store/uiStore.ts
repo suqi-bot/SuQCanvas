@@ -23,6 +23,9 @@ interface UiState {
   imageViewer: { assetId: string; name: string; thumbnail?: boolean } | null
   openImageViewer: (assetId: string, name: string, thumbnail?: boolean) => void
   closeImageViewer: () => void
+  videoViewer: { assetId: string; name: string } | null
+  openVideoViewer: (assetId: string, name: string) => void
+  closeVideoViewer: () => void
   markdownViewer: { assetId: string; name: string; nodeId?: string } | null
   openMarkdownViewer: (assetId: string, name: string, nodeId?: string) => void
   closeMarkdownViewer: () => void
@@ -71,6 +74,13 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   closeImageViewer: () => {
     set({ imageViewer: null })
+  },
+  videoViewer: null,
+  openVideoViewer: (assetId, name) => {
+    set({ videoViewer: { assetId, name } })
+  },
+  closeVideoViewer: () => {
+    set({ videoViewer: null })
   },
   markdownViewer: null,
   openMarkdownViewer: (assetId, name, nodeId) => {

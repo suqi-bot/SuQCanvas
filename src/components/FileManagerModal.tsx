@@ -198,6 +198,9 @@ export function FileManagerModal() {
     } else if (file.kind === 'pdf') {
       setOpen(false)
       ui.openPdfViewer(file.assetId, file.name)
+    } else if (file.kind === 'video') {
+      setOpen(false)
+      ui.openVideoViewer(file.assetId, file.name)
     } else if (file.kind === 'markdown') {
       setOpen(false)
       ui.openMarkdownViewer(file.assetId, file.name, nodeId)
