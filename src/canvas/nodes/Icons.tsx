@@ -273,6 +273,22 @@ export function ChevronRightIcon(props: IconProps) {
   )
 }
 
+export function ChevronDownIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M5 9l7 7 7-7" />
+    </Base>
+  )
+}
+
+export function ChevronUpIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M19 15l-7-7-7 7" />
+    </Base>
+  )
+}
+
 export function RewindIcon(props: IconProps) {
   return (
     <Base {...props}>

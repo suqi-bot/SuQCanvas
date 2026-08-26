@@ -32,6 +32,65 @@ describe('画布元素元数据', () => {
   })
 })
 
+describe('复制与粘贴', () => {
+  it('复制选中的元素后可粘贴出新元素并保留选中态', () => {
+    useCanvasStore.getState().addNodes([node('a'), node('b')])
+    useCanvasStore.setState({
+      nodes: useCanvasStore.getState().nodes.map((n, i) => ({ ...n, selected: i === 0 })),
+    })
+
+    useCanvasStore.getState().copySelected()
+    expect(useCanvasStore.getState().clipboard?.map((n) => n.id)).toEqual(['a'])
+
+    useCanvasStore.getState().pasteClipboard()
+    const state = useCanvasStore.getState()
+    expect(state.nodes).toHaveLength(3)
+    const pasted = state.nodes.find((n) => n.id !== 'a' && n.id !== 'b')
+    expect(pasted).toBeDefined()
+    expect(pasted!.selected).toBe(true)
+    expect(pasted!.position).toEqual({ x: 28, y: 28 })
+    expect(pasted!.data.createdByName).toBe('小苏')
+    expect(state.nodes.find((n) => n.id === 'a')?.selected).toBe(false)
+  })
+
+  it('粘贴时连带复制被选元素之间的连线并重连新节点', () => {
+    const a = node('a')
+    const b = node('b')
+    useCanvasStore.getState().addNodes([a, b])
+    useCanvasStore.setState({
+      edges: [
+        { id: 'e1', source: 'a', target: 'b', type: 'styled', data: { style: { lineStyle: 'solid', pathType: 'bezier', arrow: 'end', stroke: '#000', strokeWidth: 1 } } },
+        { id: 'e2', source: 'a', target: 'out', type: 'styled', data: { style: { lineStyle: 'solid', pathType: 'bezier', arrow: 'end', stroke: '#000', strokeWidth: 1 } } },
+      ],
+      nodes: [
+        { ...a, selected: true },
+        { ...b, selected: true },
+        { ...node('out'), selected: false },
+      ],
+    })
+
+    useCanvasStore.getState().copySelected()
+    useCanvasStore.getState().pasteClipboard()
+
+    const state = useCanvasStore.getState()
+    const ids = new Set(state.nodes.map((n) => n.id))
+    const pastedIds = state.nodes.filter((n) => n.selected).map((n) => n.id)
+    const pasteEdge = state.edges.find((e) => e.id !== 'e1' && e.id !== 'e2')
+    expect(pasteEdge).toBeDefined()
+    expect(pasteEdge!.source).toBe(pastedIds[0])
+    expect(pasteEdge!.target).toBe(pastedIds[1])
+    expect(ids.has(pasteEdge!.source)).toBe(true)
+    expect(ids.has(pasteEdge!.target)).toBe(true)
+    expect(state.edges).toHaveLength(3)
+  })
+
+  it('无选中元素时不复制', () => {
+    useCanvasStore.getState().addNodes([node('a')])
+    useCanvasStore.getState().copySelected()
+    expect(useCanvasStore.getState().clipboard).toBeNull()
+  })
+})
+
 describe('元素层级', () => {
   it('支持置顶、上移、下移和置底', () => {
     useCanvasStore.getState().addNodes([node('a'), node('b'), node('c')])

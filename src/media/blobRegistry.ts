@@ -50,6 +50,14 @@ async function fetchBlobFromCloud(assetId: string): Promise<void> {
 export async function getAssetUrl(assetId: string): Promise<string> {
   const cached = urlCache.get(assetId)
   if (cached) return cached
+  const blob = await getAssetBlob(assetId)
+  const url = URL.createObjectURL(blob)
+  urlCache.set(assetId, url)
+  return url
+}
+
+/** 获取原始资源 Blob（优先本地缓存，其次云端/局域网拉取） */
+export async function getAssetBlob(assetId: string): Promise<Blob> {
   let record = await db.assets.get(assetId)
   if (!record || !(record.blob instanceof Blob)) {
     if (record) await db.assets.delete(assetId)
@@ -65,9 +73,7 @@ export async function getAssetUrl(assetId: string): Promise<string> {
     if (!record) record = await db.assets.get(assetId)
   }
   if (!record || !(record.blob instanceof Blob)) throw new Error(`资源不存在: ${assetId}`)
-  const url = URL.createObjectURL(record.blob)
-  urlCache.set(assetId, url)
-  return url
+  return record.blob
 }
 
 export async function getThumbnailUrl(assetId: string): Promise<string | undefined> {

@@ -44,6 +44,9 @@ interface CanvasState {
   updateNodeData: (id: string, data: Partial<SuqNode['data']>) => void
   updateEdgeData: (id: string, data: Partial<SuqEdge['data']>) => void
   duplicateNode: (id: string) => void
+  clipboard: SuqNode[] | null
+  copySelected: () => void
+  pasteClipboard: () => void
   changeNodeLayer: (id: string, mode: LayerMode) => void
   setNodeZIndex: (id: string, zIndex: number) => void
   removeAssets: (assetIds: string[]) => void
@@ -118,6 +121,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   viewport: { x: 0, y: 0, zoom: 1 },
   past: [],
   future: [],
+  clipboard: null,
 
   onNodesChange: (changes) => {
     const s = get()
@@ -185,7 +189,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       ),
     })
   },
-  duplicateNode: (id) => {
+duplicateNode: (id) => {
     const node = get().nodes.find((n) => n.id === id)
     if (!node) return
     const clone: SuqNode = {
@@ -197,6 +201,48 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }
     snapshotNow(set, get)
     set({ nodes: [...get().nodes, clone] })
+  },
+  copySelected: () => {
+    const nodes = get().nodes.filter((n) => n.selected)
+    if (nodes.length === 0) return
+    set({
+      clipboard: structuredClone(
+        nodes.map((n) => ({ ...n, selected: false, dragging: false } as SuqNode)),
+      ),
+    })
+  },
+  pasteClipboard: () => {
+    const clipboard = get().clipboard
+    if (!clipboard || clipboard.length === 0) return
+    snapshotNow(set, get)
+    const idMap = new Map(clipboard.map((n) => [n.id, genId('n')]))
+    const pasted: SuqNode[] = clipboard.map((node) => {
+      const clone = structuredClone(node) as SuqNode
+      clone.id = idMap.get(node.id)!
+      clone.position = { x: node.position.x + 28, y: node.position.y + 28 }
+      clone.selected = true
+      clone.dragging = false
+      clone.data = { ...clone.data, ...insertionMeta() }
+      return clone
+    })
+    const selected = new Set(pasted.map((n) => n.id))
+    const pasteEdges: SuqEdge[] = get()
+      .edges.filter(
+        (e) => idMap.has(e.source) && idMap.has(e.target),
+      )
+      .map((e) => ({
+        ...structuredClone(e),
+        id: genId('e'),
+        source: idMap.get(e.source)!,
+        target: idMap.get(e.target)!,
+      }))
+    set({
+      nodes: [
+        ...get().nodes.map((n) => ({ ...n, selected: selected.has(n.id) })),
+        ...pasted,
+      ],
+      edges: [...get().edges, ...pasteEdges],
+    })
   },
   changeNodeLayer: (id, mode) => {
     const nodes = get().nodes
@@ -347,6 +393,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set({ viewport })
   },
   reset: () => {
-    set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } })
+    set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, clipboard: null })
   },
 }))

@@ -11,6 +11,7 @@ import {
   getDefaultLanUrl,
   joinLanProject,
   lanConnect,
+  lanDisconnect,
   requestAssetFromLan,
   bufToB64,
   b64ToUint8,
@@ -218,4 +219,48 @@ describe('LAN 协作项目', () => {
     other.close()
     expect(leaked).toBe(false)
   })
+})
+
+async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return
+    await sleep(150)
+  }
+  throw new Error(`等待超时（${timeoutMs}ms）`)
+}
+
+describe('LAN 断线自动重连', () => {
+  it('中继服务器重启后无需手动操作自动恢复连接', async () => {
+    lanDisconnect()
+    await sleep(300)
+
+    const retryPort = PORT + 1
+    const retryDir = await mkdtemp(join(tmpdir(), 'suqcanvas-lan-retry-'))
+    let retryServer = spawn('node', ['server/lan-server.mjs'], {
+      env: { ...process.env, PORT: String(retryPort), LAN_DATA_DIR: retryDir },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    retryServer.stderr?.on('data', (d) => process.stderr.write(`[retry-server] ${d}`))
+    try {
+      await connectWhenReady(`ws://127.0.0.1:${retryPort}/lan-ws`).then((sock) => sock.close())
+      expect(lanConnect(`ws://127.0.0.1:${retryPort}/lan-ws`, 'device-B')).toBe(true)
+      await waitFor(() => useLanStore.getState().status === 'connected', 5000)
+
+      // 杀掉中继模拟部署重启，断开后进入自动重连
+      retryServer.kill()
+      await waitFor(() => useLanStore.getState().status !== 'connected', 6000)
+
+      // 重启中继，客户端应在退避重试中自动恢复
+      retryServer = spawn('node', ['server/lan-server.mjs'], {
+        env: { ...process.env, PORT: String(retryPort), LAN_DATA_DIR: retryDir },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      retryServer.stderr?.on('data', (d) => process.stderr.write(`[retry-server] ${d}`))
+      await waitFor(() => useLanStore.getState().status === 'connected', 20000)
+    } finally {
+      retryServer?.kill()
+      await rm(retryDir, { recursive: true, force: true })
+    }
+  }, 40000)
 })

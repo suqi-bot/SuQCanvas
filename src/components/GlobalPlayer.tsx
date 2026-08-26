@@ -61,6 +61,27 @@ export function GlobalPlayer() {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
   }
 
+  // 展开/收起或窗口尺寸变化后，把拖拽位置重新钳制在视口内，
+  // 避免“收起状态下拖到边缘、再展开”时悬浮条超出屏幕边界
+  useEffect(() => {
+    const clamp = () => {
+      const bar = barRef.current
+      if (!bar) return
+      setDragPos((prev) => {
+        if (!prev) return prev
+        const maxX = Math.max(0, window.innerWidth - bar.offsetWidth)
+        const maxY = Math.max(0, window.innerHeight - bar.offsetHeight)
+        const x = Math.max(0, Math.min(prev.x, maxX))
+        const y = Math.max(0, Math.min(prev.y, maxY))
+        if (x === prev.x && y === prev.y) return prev
+        return { x, y }
+      })
+    }
+    clamp()
+    window.addEventListener('resize', clamp)
+    return () => window.removeEventListener('resize', clamp)
+  }, [collapsed])
+
   useEffect(() => {
     const el = audioRef.current
     if (!el) return

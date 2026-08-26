@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useLanStore } from '../store/lanStore'
-import { getDefaultLanUrl, lanConnect, lanDisconnect } from '../sync/lanClient'
+import { getDefaultLanUrl, getSavedLanConfig, lanConnect, lanDisconnect } from '../sync/lanClient'
 import { LanIcon } from '../canvas/nodes/Icons'
 import { getLanUserColor } from '../sync/lanColors'
 
@@ -25,10 +25,18 @@ export function LanPanel() {
   const activities = useLanStore((s) => s.activities)
   const setFollowId = useLanStore((s) => s.setFollowId)
   const [open, setOpen] = useState(false)
-  const [urlDraft, setUrlDraft] = useState(getDefaultLanUrl)
-  const [nameDraft, setNameDraft] = useState('')
+  const [urlDraft, setUrlDraft] = useState(() => getSavedLanConfig()?.url ?? getDefaultLanUrl())
+  const [nameDraft, setNameDraft] = useState(() => getSavedLanConfig()?.name ?? '')
 
   const connected = status === 'connected'
+  const savedConfig = getSavedLanConfig()
+
+  const reconnect = () => {
+    const cfg = savedConfig ?? { url: useLanStore.getState().url, name: useLanStore.getState().name }
+    const u = cfg.url.trim()
+    if (!u) return
+    lanConnect(u, cfg.name.trim() || `设备-${Math.random().toString(36).slice(2, 6)}`)
+  }
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
@@ -101,6 +109,15 @@ export function LanPanel() {
             >
               {connected ? '断开连接' : '连接'}
             </button>
+            {!connected && status !== 'connecting' && !!savedConfig && (
+              <button
+                type="button"
+                onClick={reconnect}
+                className="w-full rounded-lg border border-sky-600/40 py-1.5 text-sm font-medium text-sky-400 transition-colors hover:bg-sky-600/10"
+              >
+                重新连接
+              </button>
+            )}
           </form>
 
           <div className="mt-4">

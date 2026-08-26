@@ -215,6 +215,8 @@ export function AudioBackground({
     let raf = 0
     let last = performance.now()
     const values = new Float32Array(BAR_COUNT)
+    // 暂停时降频计数：隔帧跳过，保留水面/光斑氛围动画但显著降低 CPU 占用
+    let pausedSkip = 0
 
     const resize = () => {
       const dpr = Math.min(2, window.devicePixelRatio || 1)
@@ -243,6 +245,15 @@ export function AudioBackground({
     if (E_BOKEH) initBokeh()
 
     const render = (now: number) => {
+      // 暂停时降频到约 1/4 帧率（~15fps）：跳过的帧不重绘不清屏，
+      // 水面波光等使用真实时间戳的动画仍保持原速，dt 驱动的回落/漂移略微变缓
+      if (!playingRef.current) {
+        pausedSkip += 1
+        if (pausedSkip % 4 !== 0) {
+          raf = requestAnimationFrame(render)
+          return
+        }
+      }
       const w = canvas.width
       const h = canvas.height
       const dpr = Math.min(2, window.devicePixelRatio || 1)

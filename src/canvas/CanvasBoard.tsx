@@ -33,6 +33,7 @@ import { mediaNodeTypes } from './nodes/nodeTypes'
 import { styledEdgeTypes } from './edges/edgeTypes'
 import { InspectorPanel } from '../components/InspectorPanel'
 import { isNodeLockedByOther, sendLanCursor, setLanEditing, clearLanEditing } from '../sync/lanClient'
+import { writeSelectionToSystemClipboard } from './clipboard'
 
 const MIN_ZOOM = 0.05
 const MAX_ZOOM = 8
@@ -124,6 +125,14 @@ function BoardInner() {
         for (const n of selected) {
           useCanvasStore.getState().duplicateNode(n.id)
         }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        e.preventDefault()
+        const selected = useCanvasStore.getState().nodes.filter((n) => n.selected)
+        useCanvasStore.getState().copySelected()
+        void writeSelectionToSystemClipboard(selected)
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault()
+        useCanvasStore.getState().pasteClipboard()
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault()
         const all = useCanvasStore.getState().nodes

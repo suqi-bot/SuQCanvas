@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   AudioIcon,
+  ChevronDownIcon,
   ChevronLeftIcon,
+  ChevronUpIcon,
   CloseIcon,
   DownloadIcon,
   FlowIcon,
@@ -146,6 +148,8 @@ export function AudioPlayerView({
   }, [canvasNodes, canvasEdges, mp3Files])
   const [asideTab, setAsideTab] = useState<'songs' | 'playlists'>('songs')
   const [queueOpen, setQueueOpen] = useState(false)
+  // 歌单标签页中展开预览的歌单 id（null = 全部收起）
+  const [expandedPlaylistId, setExpandedPlaylistId] = useState<string | null>(null)
   // 从画布歌单入口(文本节点徽标)进入时,挂载后把该歌单设为播放队列;
   // 播放器已打开时再次点击徽标(initialPlaylistId 变化)也重新设置队列
   const queueInitRef = useRef<string | null | undefined>(undefined)
@@ -197,6 +201,9 @@ export function AudioPlayerView({
     () => (current ? mp3Files.find((file) => file.assetId === current.assetId) : undefined),
     [mp3Files, current],
   )
+  // 供键盘快捷键读取最新曲目（避免空依赖闭包捕获过期 current）
+  const currentRef = useRef<EngineTrack | null>(null)
+  currentRef.current = current
   // 歌词/专辑图等按当前曲目读取画布节点信息（用 ref 避免画布编辑时触发重载）
   const currentNodesRef = useRef<SuqNode[]>([])
   currentNodesRef.current = currentFile?.nodes ?? []
@@ -244,19 +251,18 @@ export function AudioPlayerView({
   const hue = palette?.hue ?? nameHue(current?.name ?? '')
   const accent = palette?.accent ?? '#38bdf8'
   const accentRgb = palette?.accentRgb ?? '56,189,248'
-  // 歌词与背景反色对色：色相取背景主色的反色(互补),明度强制与背景相反
+  // 歌词白色/灰色系：背景深用白、背景浅用深灰，随背景深浅自动切换
   const darkBg = (palette?.luminance ?? 0.16) < 0.5
-  const lyricHue = Math.round((palette?.invertHue ?? 0) || (hue + 180) % 360)
   const lyricStyle = {
     '--sq-lyric-base': darkBg
-      ? `hsl(${lyricHue} 58% 82%)`
-      : `hsl(${lyricHue} 52% 15%)`,
+      ? '#ffffff'
+      : '#3f3f46',
     '--sq-lyric-soft': darkBg
-      ? `hsl(${lyricHue} 45% 78% / 0.78)`
-      : `hsl(${lyricHue} 42% 24% / 0.72)`,
+      ? 'rgba(255, 255, 255, 0.78)'
+      : 'rgba(63, 63, 70, 0.72)',
     '--sq-lyric-dim': darkBg
-      ? `hsl(${lyricHue} 42% 70% / 0.5)`
-      : `hsl(${lyricHue} 38% 18% / 0.48)`,
+      ? 'rgba(255, 255, 255, 0.5)'
+      : 'rgba(63, 63, 70, 0.5)',
     '--sq-lyric-glow': darkBg
       ? `0 0 30px ${accent}4d, 0 2px 12px rgba(0,0,0,0.65)`
       : '0 2px 2px rgba(255,255,255,0.4), 0 2px 12px rgba(0,0,0,0.3)',
@@ -285,21 +291,23 @@ export function AudioPlayerView({
       { autoplay: true },
     )
   }
-  const openPlaylist = (playlist: Playlist) => {
-    const first = playlist.tracks[0]
-    if (!first) return
+  // 从歌单第 index 首开始播放（index=0 即整体播放该歌单）
+  const openPlaylistAt = (playlist: Playlist, index: number) => {
+    const track = playlist.tracks[index]
+    if (!track) return
     const player = usePlayerStore.getState()
     player.setQueue({
       id: playlist.id,
       name: playlist.name,
-      assetIds: playlist.tracks.map((track) => track.assetId),
+      assetIds: playlist.tracks.map((item) => item.assetId),
     })
     player.setMode('flow')
     player.play(
-      { assetId: first.assetId, name: first.name, nodeId: first.nodeId },
+      { assetId: track.assetId, name: track.name, nodeId: track.nodeId },
       { autoplay: true },
     )
   }
+  const openPlaylist = (playlist: Playlist) => openPlaylistAt(playlist, 0)
   const downloadCurrent = async () => {
     if (!current) return
     try {
@@ -323,6 +331,50 @@ export function AudioPlayerView({
       return next
     })
   }
+
+  // 沉浸式播放器键盘快捷键：空格播放/暂停、←/→ 快退快进、↑/↓ 音量、L 喜欢
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return
+      const target = e.target as HTMLElement
+      const tag = target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return
+      const player = usePlayerStore.getState()
+      switch (e.code) {
+        case 'Space':
+          e.preventDefault()
+          if (player.track) player.toggle()
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          player.seekBy(-10)
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          player.seekBy(10)
+          break
+        case 'ArrowUp':
+          e.preventDefault()
+          player.setVolume(Math.min(1, player.volume + 0.1))
+          break
+        case 'ArrowDown':
+          e.preventDefault()
+          player.setVolume(Math.max(0, player.volume - 0.1))
+          break
+        case 'KeyL':
+          e.preventDefault()
+          setLiked((prev) => {
+            const next = !prev
+            const id = currentRef.current?.assetId
+            if (id) saveLiked(id, next)
+            return next
+          })
+          break
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   useEffect(() => {
     usePlayerStore.getState().setBarVisible(false)
@@ -697,33 +749,83 @@ export function AudioPlayerView({
                 ) : (
                   playlists.map((playlist) => {
                     const isActive = queue?.id === playlist.id
+                    const expanded = expandedPlaylistId === playlist.id
+                    const currentAssetId = track?.assetId
+                    const activeTrackAssetId = playlist.tracks.some((item) => item.assetId === currentAssetId)
+                      ? currentAssetId
+                      : undefined
                     return (
-                      <button
+                      <div
                         key={playlist.id}
-                        type="button"
-                        onClick={() => openPlaylist(playlist)}
-                        className={`mb-2 block w-full rounded-lg border p-2.5 text-left transition-colors ${isActive ? 'border-sky-500/40 bg-sky-500/10' : 'border-edge2 bg-panel2 hover:bg-hover'}`}
+                        className={`mb-2 overflow-hidden rounded-lg border transition-colors ${isActive ? 'border-sky-500/40 bg-sky-500/10' : 'border-edge2 bg-panel2'}`}
                       >
-                        <div className="flex items-center gap-1.5">
-                          <FlowIcon className="shrink-0 text-sky-400" />
-                          <span className={`min-w-0 truncate text-xs font-medium ${isActive ? 'text-sky-400' : 'text-main'}`} title={playlist.name}>
-                            {playlist.name}
-                          </span>
-                          {playlist.warnings.length > 0 && (
-                            <span
-                              className="shrink-0 text-[10px] text-amber-400"
-                              title={playlist.warnings.join('；')}
-                            >
-                              ⚠
-                            </span>
-                          )}
-                          <span className="ml-auto shrink-0 text-[10px] tabular-nums text-dim">{playlist.tracks.length} 首</span>
+                        <div className="flex items-stretch">
+                          <button
+                            type="button"
+                            onClick={() => openPlaylist(playlist)}
+                            className={`min-w-0 flex-1 p-2.5 text-left transition-colors ${isActive ? '' : 'hover:bg-hover'}`}
+                            title={`播放歌单「${playlist.name}」（${playlist.tracks.length} 首）`}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <FlowIcon className="shrink-0 text-sky-400" />
+                              <span className={`min-w-0 truncate text-xs font-medium ${isActive ? 'text-sky-400' : 'text-main'}`} title={playlist.name}>
+                                {playlist.name}
+                              </span>
+                              {playlist.warnings.length > 0 && (
+                                <span
+                                  className="shrink-0 text-[10px] text-amber-400"
+                                  title={playlist.warnings.join('；')}
+                                >
+                                  ⚠
+                                </span>
+                              )}
+                              <span className="ml-auto shrink-0 text-[10px] tabular-nums text-dim">{playlist.tracks.length} 首</span>
+                            </div>
+                            <div className="mt-1 truncate text-[10px] text-dim" title={playlist.tracks.map((item) => item.name).join(' → ')}>
+                              {playlist.tracks.slice(0, 3).map((item) => item.name).join(' → ')}
+                              {playlist.tracks.length > 3 ? ' …' : ''}
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedPlaylistId(expanded ? null : playlist.id)}
+                            className={`flex shrink-0 items-center border-l border-edge/60 px-2.5 transition-colors ${expanded ? 'text-sky-400' : 'text-soft hover:bg-hover hover:text-main'}`}
+                            title={expanded ? '收起歌单预览' : '展开歌单预览'}
+                            aria-expanded={expanded}
+                            aria-label={expanded ? `收起歌单「${playlist.name}」` : `展开歌单「${playlist.name}」`}
+                          >
+                            {expanded ? <ChevronUpIcon className="h-4 w-4" /> : <ChevronDownIcon className="h-4 w-4" />}
+                          </button>
                         </div>
-                        <div className="mt-1 truncate text-[10px] text-dim" title={playlist.tracks.map((track) => track.name).join(' → ')}>
-                          {playlist.tracks.slice(0, 3).map((track) => track.name).join(' → ')}
-                          {playlist.tracks.length > 3 ? ' …' : ''}
-                        </div>
-                      </button>
+                        {expanded && (
+                          <div className="border-t border-edge/60 py-1">
+                            {playlist.tracks.map((playlistTrack, trackIndex) => {
+                              const isPlaying = playlistTrack.assetId === activeTrackAssetId
+                              return (
+                                <button
+                                  key={playlistTrack.nodeId}
+                                  type="button"
+                                  onClick={() => openPlaylistAt(playlist, trackIndex)}
+                                  className={`group flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors ${isPlaying ? 'bg-sky-500/10' : 'hover:bg-hover'}`}
+                                  title={`从「${playlistTrack.name}」开始播放该歌单`}
+                                >
+                                  <span className="flex w-5 shrink-0 justify-center">
+                                    {isPlaying && playing ? (
+                                      <span className="sq-eq"><span /><span /><span /></span>
+                                    ) : (
+                                      <span className={`text-[11px] tabular-nums ${isPlaying ? 'text-sky-400' : 'text-faint'}`}>{trackIndex + 1}</span>
+                                    )}
+                                  </span>
+                                  <span className={`min-w-0 flex-1 truncate text-xs ${isPlaying ? 'font-medium text-sky-400' : 'text-main'}`} title={playlistTrack.name}>
+                                    {playlistTrack.name}
+                                  </span>
+                                  {isPlaying && <AudioIcon className="h-3.5 w-3.5 shrink-0 text-sky-400" />}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
                     )
                   })
                 )}
@@ -750,7 +852,10 @@ export function AudioPlayerView({
                   {albumUrls[0] ? (
                     <img src={albumUrls[0]} alt="" className="h-full w-full object-cover" draggable={false} />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900">
+                    <div
+                      className="flex h-full w-full items-center justify-center"
+                      style={{ background: `linear-gradient(135deg, hsl(${hue} 38% 20%), hsl(${hue} 52% 32%))` }}
+                    >
                       <AudioIcon className="h-1/3 w-1/3 text-white/40" />
                     </div>
                   )}
@@ -842,10 +947,27 @@ export function AudioPlayerView({
                   </div>
                 )}
                 {lyricsState === 'none' && (
-                  <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-                    <AudioIcon className="h-8 w-8" style={{ color: 'var(--sq-lyric-dim)' }} />
-                    <p className="text-xs" style={{ color: 'var(--sq-lyric-soft)' }}>暂无歌词</p>
-                    <p className="max-w-64 text-[11px] leading-relaxed" style={{ color: 'var(--sq-lyric-dim)' }}>导入 .lrc 文件并在画布上连线指向该歌曲即可作为歌词；内嵌歌词（ID3）的 MP3 自动识别</p>
+                  <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                    <div
+                      className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 backdrop-blur"
+                      style={{ background: `linear-gradient(135deg, ${accent}26, ${accent}0d)`, boxShadow: `0 8px 30px rgba(${accentRgb}, 0.14)` }}
+                    >
+                      <AudioIcon className="h-6 w-6" style={{ color: 'var(--sq-lyric-soft)' }} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium" style={{ color: 'var(--sq-lyric-base)' }}>暂无歌词</p>
+                      <p className="mt-1 text-[11px]" style={{ color: 'var(--sq-lyric-dim)' }}>跟着旋律哼唱，也可以为它配上歌词</p>
+                    </div>
+                    <div className="mt-1 w-full max-w-72 space-y-2 text-left">
+                      <div className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-black/25 px-3.5 py-2.5 backdrop-blur">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold" style={{ background: accent, color: '#06121f' }}>1</span>
+                        <span className="text-[11px] leading-relaxed" style={{ color: 'var(--sq-lyric-soft)' }}>导入 .lrc 文件并在画布上连线指向该歌曲，即可作为同步歌词</span>
+                      </div>
+                      <div className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-black/25 px-3.5 py-2.5 backdrop-blur">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold" style={{ background: accent, color: '#06121f' }}>2</span>
+                        <span className="text-[11px] leading-relaxed" style={{ color: 'var(--sq-lyric-soft)' }}>内嵌歌词（ID3）的 MP3 打开后自动识别</span>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

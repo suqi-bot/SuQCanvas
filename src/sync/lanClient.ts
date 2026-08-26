@@ -66,6 +66,41 @@ let applyingRemote = false
 let syncTimer: ReturnType<typeof setTimeout> | null = null
 let vpTimer: ReturnType<typeof setTimeout> | null = null
 
+// ---- 断线自动重连 ----
+const RECONNECT_BASE_MS = 1000
+const RECONNECT_MAX_MS = 15000
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let reconnectAttempts = 0
+let reconnectTarget: { url: string; name: string } | null = null
+let hasConnectedBefore = false
+let reconnectInProgress = false
+
+function cancelReconnect(): void {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+  reconnectAttempts = 0
+  reconnectTarget = null
+  reconnectInProgress = false
+}
+
+function scheduleReconnect(): void {
+  if (reconnectTimer || !reconnectTarget) return
+  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** reconnectAttempts)
+  reconnectAttempts += 1
+  if (reconnectAttempts === 1) {
+    useLanStore.setState({ status: 'connecting' })
+    toast('局域网连接断开，正在自动重连…', 'info')
+  }
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    const target = reconnectTarget
+    if (!target || isLanConnected()) return
+    lanConnect(target.url, target.name, { isReconnect: true })
+  }, delay)
+}
+
 /** assetId -> 分片收集 */
 interface PendingAsset {
   meta: AssetMeta
@@ -120,13 +155,15 @@ function parseUsers(value: unknown): LanUser[] {
     })
 }
 
-export function lanConnect(url: string, name: string): boolean {
+export function lanConnect(url: string, name: string, opts: { isReconnect?: boolean } = {}): boolean {
   if (ws) {
     ws.onclose = null
     ws.onerror = null
     ws.close()
     ws = null
   }
+  if (!opts.isReconnect) cancelReconnect()
+  else reconnectInProgress = true
   const store = useLanStore.getState()
 
   let resolvedUrl: string
@@ -155,6 +192,10 @@ export function lanConnect(url: string, name: string): boolean {
 
   sock.onopen = () => {
     opened = true
+    reconnectInProgress = false
+    hasConnectedBefore = true
+    reconnectTarget = { url: resolvedUrl, name }
+    reconnectAttempts = 0
     try {
       localStorage.setItem(LAN_STORAGE_KEY, JSON.stringify({ url: resolvedUrl, name }))
     } catch {
@@ -164,7 +205,7 @@ export function lanConnect(url: string, name: string): boolean {
     send({ t: 'hello', name })
     const activeProjectId = useLanStore.getState().activeProjectId
     if (activeProjectId) send({ t: 'join-project', projectId: activeProjectId })
-    toast('已连接局域网协作', 'success')
+    toast(opts.isReconnect ? '已恢复局域网协作连接' : '已连接局域网协作', 'success')
     // 加入后请求当前画布引用的素材
     const nodes = useCanvasStore.getState().nodes
     for (const n of nodes) {
@@ -183,7 +224,15 @@ export function lanConnect(url: string, name: string): boolean {
     })
     useLanStore.getState().clearCollaborationState()
     useLanStore.getState().clearRemoteProjects()
-    if (opened) toast('局域网连接已断开', 'error')
+    if (opened) {
+      if (hasConnectedBefore && reconnectTarget) {
+        scheduleReconnect()
+      } else {
+        toast('局域网连接已断开', 'error')
+      }
+    } else if (reconnectInProgress && hasConnectedBefore && reconnectTarget) {
+      scheduleReconnect()
+    }
   }
 
   sock.onerror = () => {
@@ -206,6 +255,8 @@ export function lanConnect(url: string, name: string): boolean {
 }
 
 export function lanDisconnect(): void {
+  cancelReconnect()
+  hasConnectedBefore = false
   try {
     localStorage.removeItem(LAN_STORAGE_KEY)
   } catch {
@@ -223,17 +274,28 @@ export function lanDisconnect(): void {
   useLanStore.getState().clearRemoteProjects()
 }
 
-/** 刷新页面后根据上次保存的地址自动重连 */
-export function autoReconnectLan(): void {
-  if (isLanConnected()) return
+/** 读取上次连接保存的地址与昵称 */
+export function getSavedLanConfig(): { url: string; name: string } | null {
   try {
     const raw = localStorage.getItem(LAN_STORAGE_KEY)
-    if (!raw) return
+    if (!raw) return null
     const saved = JSON.parse(raw) as { url?: string; name?: string }
-    if (saved?.url) lanConnect(saved.url, saved.name ?? '')
+    if (!saved?.url) return null
+    return { url: saved.url, name: saved.name ?? '' }
   } catch {
-    // 忽略存储解析失败
+    return null
   }
+}
+
+/** 刷新/加载页面后根据上次保存的地址自动重连，失败时持续自动重试 */
+export function autoReconnectLan(): void {
+  if (isLanConnected()) return
+  const saved = getSavedLanConfig()
+  if (!saved) return
+  hasConnectedBefore = true
+  reconnectTarget = saved
+  reconnectInProgress = true
+  lanConnect(saved.url, saved.name, { isReconnect: true })
 }
 
 function handleMessage(msg: LanMessage): void {
