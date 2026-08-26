@@ -9,10 +9,31 @@ export interface CoverPalette {
   accentRgb: string
   /** 主色 RGB 分量（用于背景着色，如 "r,g,b"） */
   tintRgb: string
-  /** 背景主色感知亮度（0..1），用于判断前景文字该用深色还是浅色 */
-  luminance: number
+  /**
+   * 歌词区背景的 WCAG 相对亮度（0..1）：按播放器上半屏的显示方式
+   * cover-fit 裁剪后逐像素均值的线性化亮度，用于前景文字深浅抉择。
+   */
+  bgLum: number
   /** 主色的反色色相（RGB 逐通道反色后求得）,用于前景文字与背景形成反色对色 */
   invertHue: number
+}
+
+/** sRGB 单通道线性化（WCAG 相对亮度用） */
+function srgbChannel(c: number): number {
+  const x = c / 255
+  return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)
+}
+
+/** WCAG 2.x 相对亮度（0..1）：线性化后按人眼敏感度加权 */
+export function relativeLuminance(r: number, g: number, b: number): number {
+  return 0.2126 * srgbChannel(r) + 0.7152 * srgbChannel(g) + 0.0722 * srgbChannel(b)
+}
+
+/** WCAG 对比度（1..21）：两个相对亮度之间的对比度比 */
+export function contrastRatio(l1: number, l2: number): number {
+  const hi = Math.max(l1, l2)
+  const lo = Math.min(l1, l2)
+  return (hi + 0.05) / (lo + 0.05)
 }
 
 function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
@@ -42,7 +63,7 @@ function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: n
   return { h: h * 360, s, l }
 }
 
-function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+export function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
   h = ((h % 360) + 360) % 360
   const c = (1 - Math.abs(2 * l - 1)) * s
   const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
@@ -80,6 +101,50 @@ function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: n
     g: Math.round((g + m) * 255),
     b: Math.round((b + m) * 255),
   }
+}
+
+/**
+ * 采样歌词区背景亮度：按播放器背景的实际显示方式对封面 cover-fit 裁剪
+ * （背景铺满全屏视口），再取逐像素 WCAG 亮度的均值。
+ * 相比「整张封面拉伸到 48×48 求平均」，这更接近歌词真正压住的画面。
+ */
+function sampleLyricRegionLum(img: HTMLImageElement): number | null {
+  const vw = window.innerWidth || 1280
+  const vh = window.innerHeight || 720
+  const regionH = Math.max(1, vh)
+  const ir = img.width / img.height
+  const r = vw / regionH
+  let sw: number
+  let sh: number
+  let sx: number
+  let sy: number
+  if (ir > r) {
+    sh = img.height
+    sw = sh * r
+    sx = (img.width - sw) / 2
+    sy = 0
+  } else {
+    sw = img.width
+    sh = sw / r
+    sx = 0
+    sy = (img.height - sh) / 2
+  }
+  const size = 48
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, size, size)
+  const data = ctx.getImageData(0, 0, size, size).data
+  let sum = 0
+  let count = 0
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 128) continue
+    sum += relativeLuminance(data[i], data[i + 1], data[i + 2])
+    count += 1
+  }
+  return count > 0 ? sum / count : null
 }
 
 /**
@@ -151,7 +216,7 @@ export function extractCoverPalette(url: string): Promise<CoverPalette | null> {
           accent: `hsl(${Math.round(h)} ${Math.round(sat * 100)}% ${Math.round(light * 100)}%)`,
           accentRgb: `${accentRgb.r},${accentRgb.g},${accentRgb.b}`,
           tintRgb: `${Math.round(rr)},${Math.round(gg)},${Math.round(bb)}`,
-          luminance: (rr * 0.299 + gg * 0.587 + bb * 0.114) / 255,
+          bgLum: sampleLyricRegionLum(img) ?? relativeLuminance(rr, gg, bb),
           invertHue: inv.h,
         })
       } catch {

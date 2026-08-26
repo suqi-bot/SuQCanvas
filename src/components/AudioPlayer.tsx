@@ -27,8 +27,9 @@ import { getAssetUrl, getThumbnailUrl } from '../media/blobRegistry'
 import { loadLyricsFor, type LyricsData } from '../media/lyrics'
 import { findPlaylistByAsset, linearizeFrom, resolvePlaylistsCached, type Playlist } from '../media/playlists'
 import { isMp3, type ManagedFile } from '../media/managedFile'
-import { useCoverPalette } from '../media/coverColor'
+import { contrastRatio, useCoverPalette } from '../media/coverColor'
 import { AudioBackground } from './AudioBackground'
+import { SpectrumBars } from './SpectrumBars'
 import { useCanvasStore } from '../store/canvasStore'
 import { setOrderProvider, usePlayerStore, type EngineTrack, type PlaybackMode } from '../store/playerStore'
 import { toast } from '../store/uiStore'
@@ -175,6 +176,8 @@ export function AudioPlayerView({
   const mirrorRef = useRef<HTMLDivElement | null>(null)
   const lineRefs = useRef(new Map<number, HTMLButtonElement>())
   const freezeUntilRef = useRef(0)
+  // 歌词前景色当前决策(深色字 or 白字)：配合迟滞余量,临界亮度封面不来回切换
+  const darkTextRef = useRef(false)
 
   const orderedFiles = useMemo(() => {
     const result = [...mp3Files]
@@ -251,21 +254,35 @@ export function AudioPlayerView({
   const hue = palette?.hue ?? nameHue(current?.name ?? '')
   const accent = palette?.accent ?? '#38bdf8'
   const accentRgb = palette?.accentRgb ?? '56,189,248'
-  // 歌词白色/灰色系：背景深用白、背景浅用深灰，随背景深浅自动切换
-  const darkBg = (palette?.luminance ?? 0.16) < 0.5
+  // 歌词前景色：按 WCAG 对比度在 白/深灰 之间选择(取对比度更优者,相比 0.5 一刀切
+  // 能覆盖更多真实背景),并用 15% 迟滞余量避免临界亮度的封面来回闪烁。
+  // bgLum 取自封面歌词区(上半屏 cover-fit 裁剪)的像素均值亮度,无封面回退深色渐变 → 白字
+  const bgLum = palette?.bgLum ?? 0.03
+  const darkText = useMemo(() => {
+    const whiteRatio = contrastRatio(bgLum, 1)
+    const darkRatio = contrastRatio(bgLum, 0)
+    let next = darkTextRef.current
+    if (next && whiteRatio > darkRatio * 1.15) next = false
+    else if (!next && darkRatio > whiteRatio * 1.15) next = true
+    darkTextRef.current = next
+    return next
+  }, [bgLum])
+  // 歌词始终带描边 + 柔光兜底：即使明度判断翻车，文字也保持轮廓可读
   const lyricStyle = {
-    '--sq-lyric-base': darkBg
-      ? '#ffffff'
-      : '#3f3f46',
-    '--sq-lyric-soft': darkBg
-      ? 'rgba(255, 255, 255, 0.78)'
-      : 'rgba(63, 63, 70, 0.72)',
-    '--sq-lyric-dim': darkBg
-      ? 'rgba(255, 255, 255, 0.5)'
-      : 'rgba(63, 63, 70, 0.5)',
-    '--sq-lyric-glow': darkBg
-      ? `0 0 30px ${accent}4d, 0 2px 12px rgba(0,0,0,0.65)`
-      : '0 2px 2px rgba(255,255,255,0.4), 0 2px 12px rgba(0,0,0,0.3)',
+    '--sq-lyric-base': darkText
+      ? '#3f3f46'
+      : '#ffffff',
+    '--sq-lyric-soft': darkText
+      ? 'rgba(63, 63, 70, 0.78)'
+      : 'rgba(255, 255, 255, 0.78)',
+    '--sq-lyric-dim': darkText
+      ? 'rgba(63, 63, 70, 0.5)'
+      : 'rgba(255, 255, 255, 0.5)',
+    '--sq-lyric-glow': darkText
+      // 深灰字 + 白描边/白晕
+      ? '0 1px 2px rgba(255,255,255,0.9), 0 0 8px rgba(255,255,255,0.55), 0 2px 12px rgba(0,0,0,0.3)'
+      // 白字 + 暗描边 + 强调色柔光
+      : `0 1px 2px rgba(0,0,0,0.85), 0 0 8px rgba(0,0,0,0.55), 0 0 30px ${accent}4d`,
   } as const
 
   const toggle = () => usePlayerStore.getState().toggle()
@@ -865,7 +882,10 @@ export function AudioPlayerView({
               <div className="sq-disc-shine pointer-events-none absolute inset-0 rounded-full" />
             </div>
 
-            <div className="mt-10 w-full max-w-md px-2 text-center">
+            {/* 封面下方紧凑频谱条（颜色随背景主色变化） */}
+            <SpectrumBars playing={playing} hue={hue} className="mt-6 h-8 w-[min(52vw,230px)] sm:h-9 sm:w-[250px]" />
+
+            <div className="mt-6 w-full max-w-md px-2 text-center">
               <div className="flex items-center justify-center gap-2.5">
                 <h1 className="min-w-0 truncate text-2xl font-bold tracking-tight text-white sm:text-[1.8rem]" title={current.name} style={{ textShadow: '0 2px 16px rgba(0,0,0,0.55), 0 1px 3px rgba(0,0,0,0.4)' }}>
                   {current.name}
