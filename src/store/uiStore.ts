@@ -2,6 +2,11 @@ import { create } from 'zustand'
 
 export type ToolMode = 'select' | 'connect' | 'drag'
 
+/** 专用播放器页入口：画布音频/视频节点双击进入 */
+export type PlayerPageState =
+  | { kind: 'audio'; assetId: string; flow: boolean; playlistId?: string }
+  | { kind: 'video'; assetId: string; name: string }
+
 export type ToastKind = 'info' | 'error' | 'success'
 
 export interface ToastItem {
@@ -23,9 +28,9 @@ interface UiState {
   imageViewer: { assetId: string; name: string; thumbnail?: boolean } | null
   openImageViewer: (assetId: string, name: string, thumbnail?: boolean) => void
   closeImageViewer: () => void
-  videoViewer: { assetId: string; name: string } | null
-  openVideoViewer: (assetId: string, name: string) => void
-  closeVideoViewer: () => void
+  playerPage: PlayerPageState | null
+  openPlayerPage: (page: PlayerPageState) => void
+  closePlayerPage: () => void
   markdownViewer: { assetId: string; name: string; nodeId?: string } | null
   openMarkdownViewer: (assetId: string, name: string, nodeId?: string) => void
   closeMarkdownViewer: () => void
@@ -75,12 +80,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   closeImageViewer: () => {
     set({ imageViewer: null })
   },
-  videoViewer: null,
-  openVideoViewer: (assetId, name) => {
-    set({ videoViewer: { assetId, name } })
+  playerPage: null,
+  openPlayerPage: (page) => {
+    set({ playerPage: page })
   },
-  closeVideoViewer: () => {
-    set({ videoViewer: null })
+  closePlayerPage: () => {
+    set({ playerPage: null })
   },
   markdownViewer: null,
   openMarkdownViewer: (assetId, name, nodeId) => {

@@ -8,7 +8,6 @@ import { usePlayerStore } from '../../store/playerStore'
 import { toast, useUiStore } from '../../store/uiStore'
 import { MediaNodeShell } from './MediaNodeShell'
 import { AudioIcon, DownloadIcon, PauseIcon, PlayIcon } from './Icons'
-
 function fmtTime(seconds: number): string {
   if (!Number.isFinite(seconds)) return '0:00'
   const m = Math.floor(seconds / 60)
@@ -64,6 +63,12 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
     }
   }
 
+  // 双击节点进入专用播放器页（流式模式，连播顺序沿用画布连线）
+  const openPlayerPage = () => {
+    if (!assetId) return
+    useUiStore.getState().openPlayerPage({ kind: 'audio', assetId, flow: true })
+  }
+
   return (
     <MediaNodeShell
       node={props}
@@ -71,7 +76,13 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
       alwaysShowCreator
       progress={progress}
     >
-      <div className="relative flex h-full w-full flex-col overflow-hidden">
+      <div
+        className="relative flex h-full w-full flex-col overflow-hidden"
+        onDoubleClick={(event) => {
+          event.stopPropagation()
+          openPlayerPage()
+        }}
+      >
         {coverUrl ? (
           <img
             src={coverUrl}
@@ -89,6 +100,7 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
             type="button"
             onClick={toggle}
             disabled={!assetId}
+            onDoubleClick={(event) => event.stopPropagation()}
             className="nodrag flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-500 text-white hover:bg-sky-400 disabled:opacity-40"
           >
             {showPlaying ? <PauseIcon /> : <PlayIcon className="translate-x-px" />}
@@ -101,6 +113,7 @@ export const AudioNode = memo(function AudioNode(props: NodeProps<SuqNode>) {
             onClick={() => void download()}
             disabled={!assetId}
             title="下载"
+            onDoubleClick={(event) => event.stopPropagation()}
             className="nodrag rounded p-1.5 text-soft hover:bg-hover hover:text-main disabled:opacity-35"
           >
             <DownloadIcon />

@@ -18,13 +18,13 @@ const MAX_H = 360
 export const VideoNode = memo(function VideoNode(props: NodeProps<SuqNode>) {
   const poster = useThumbnailUrl(props.data.assetId)
   const onNodesChange = useCanvasStore((s) => s.onNodesChange)
-  const openVideoViewer = useUiStore((s) => s.openVideoViewer)
+  const openPlayerPage = useUiStore((s) => s.openPlayerPage)
   const fittedRef = useRef(false)
   const filename = props.data.label ?? '视频'
 
   const openPlayer = () => {
     if (!props.data.assetId) return
-    openVideoViewer(props.data.assetId, filename)
+    openPlayerPage({ kind: 'video', assetId: props.data.assetId, name: filename })
   }
 
   // 用封面缩略图的原生尺寸自适应节点大小（缩略图与视频同宽高比）

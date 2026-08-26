@@ -8,8 +8,8 @@ import { useCanvasStore } from '../store/canvasStore'
 import { useLanStore } from '../store/lanStore'
 import { useProjectStore } from '../store/projectStore'
 import { toast, useUiStore } from '../store/uiStore'
-import type { MediaKind, SuqNode } from '../types'
-import { isMp3, type ManagedFile } from '../media/managedFile'
+import type { MediaKind } from '../types'
+import { isMp3, collectFiles, type ManagedFile } from '../media/managedFile'
 import { AudioPlayerView } from './AudioPlayer'
 
 interface TypeGroup {
@@ -36,28 +36,6 @@ const KIND_LABELS: Record<MediaKind, string> = {
   heading: '标题',
   sticky: '便签',
   shape: '图形',
-}
-
-function collectFiles(nodes: SuqNode[], records: Map<string, AssetRecord>): ManagedFile[] {
-  const grouped = new Map<string, SuqNode[]>()
-  for (const node of nodes) {
-    if (!node.data.assetId) continue
-    const list = grouped.get(node.data.assetId) ?? []
-    list.push(node)
-    grouped.set(node.data.assetId, list)
-  }
-  return [...grouped.entries()].map(([assetId, linkedNodes]) => {
-    const node = linkedNodes[0]
-    const record = records.get(assetId)
-    return {
-      assetId,
-      name: record?.name ?? node.data.label ?? '未命名文件',
-      kind: record?.kind ?? node.data.kind,
-      mime: record?.mime ?? node.data.mime ?? '',
-      size: record?.size ?? node.data.fileSize ?? 0,
-      nodes: linkedNodes,
-    }
-  })
 }
 
 function matchesFile(file: ManagedFile, query: string): boolean {
@@ -200,7 +178,7 @@ export function FileManagerModal() {
       ui.openPdfViewer(file.assetId, file.name)
     } else if (file.kind === 'video') {
       setOpen(false)
-      ui.openVideoViewer(file.assetId, file.name)
+      ui.openPlayerPage({ kind: 'video', assetId: file.assetId, name: file.name })
     } else if (file.kind === 'markdown') {
       setOpen(false)
       ui.openMarkdownViewer(file.assetId, file.name, nodeId)

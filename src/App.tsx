@@ -5,7 +5,7 @@ import { Toasts } from './components/Toasts'
 import { HomePage } from './components/HomePage'
 import { PdfViewerModal } from './components/PdfViewerModal'
 import { ImageViewerModal } from './components/ImageViewerModal'
-import { VideoViewerModal } from './components/VideoViewerModal'
+import { PlayerPage } from './components/PlayerPage'
 import { MarkdownViewerModal } from './components/MarkdownViewerModal'
 import { FileManagerModal } from './components/FileManagerModal'
 import { GlobalPlayer } from './components/GlobalPlayer'
@@ -55,7 +55,7 @@ export default function App() {
       <HomePage />
       <PdfViewerModal />
       <ImageViewerModal />
-      <VideoViewerModal />
+      <PlayerPage />
       <MarkdownViewerModal />
       <FileManagerModal />
       <GlobalPlayer />
