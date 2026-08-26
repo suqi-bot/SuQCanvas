@@ -605,6 +605,31 @@ export function TextAlignBottomIcon(props: IconProps) {
   )
 }
 
+export function FullscreenIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />
+    </Base>
+  )
+}
+
+export function ExitFullscreenIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4 9h5V4M20 9h-5V4M20 15h-5v5M9 20H4v-5" />
+    </Base>
+  )
+}
+
+export function PiPIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <rect x="3" y="5" width="18" height="13" rx="2" />
+      <rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" strokeWidth="0" />
+    </Base>
+  )
+}
+
 export function KindIcon({ kind, ...props }: IconProps & { kind: MediaKind }) {
   switch (kind) {
     case 'image':
