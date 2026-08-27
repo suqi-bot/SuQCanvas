@@ -2,6 +2,7 @@
 // Run: npm run lan (PORT and LAN_DATA_DIR can be overridden with environment variables)
 
 import { createHash, randomUUID } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { access, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { dirname, extname, join, resolve, sep } from 'node:path'
@@ -102,6 +103,86 @@ function assetPaths(id) {
   return { meta: join(ASSETS_DIR, `${key}.json`), data: join(ASSETS_DIR, `${key}.bin`) }
 }
 
+// ---- 资产 HTTP 流式拉取（支持 Range，视频边下边播） ----
+
+function parseRangeHeader(range, total) {
+  if (typeof range !== 'string') return null
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim())
+  if (!match) return null
+  const [, startStr, endStr] = match
+  let start = startStr === '' ? 0 : Number(startStr)
+  let end = endStr === '' ? total - 1 : Number(endStr)
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return null
+  if (startStr === '' && endStr !== '') {
+    // 后缀范围：最后 N 字节
+    start = Math.max(0, total - end)
+    end = total - 1
+  }
+  if (start >= total || end < start) return null
+  return { start, end: Math.min(end, total - 1) }
+}
+
+function streamFile(filePath, start, end, res) {
+  return new Promise((resolve) => {
+    const stream = createReadStream(filePath, { start, end })
+    stream.on('error', () => {
+      if (!res.headersSent) {
+        res.writeHead(500)
+        res.end('Internal error')
+      } else {
+        res.destroy()
+      }
+    })
+    stream.on('end', resolve)
+    stream.pipe(res)
+  })
+}
+
+async function serveAsset(req, res, assetId) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { Allow: 'GET, HEAD' })
+    res.end()
+    return
+  }
+  const paths = assetPaths(assetId)
+  let meta
+  let fileStat
+  try {
+    ;[meta, fileStat] = await Promise.all([
+      readFile(paths.meta, 'utf8').then(JSON.parse),
+      stat(paths.data),
+    ])
+  } catch {
+    res.writeHead(404)
+    res.end('Not found')
+    return
+  }
+  const total = fileStat.size
+  const contentType = String(meta?.mime || 'application/octet-stream')
+  const range = parseRangeHeader(req.headers.range, total)
+  const baseHeaders = {
+    'Content-Type': contentType,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'public, max-age=86400',
+  }
+  if (range) {
+    const { start, end } = range
+    res.writeHead(206, {
+      ...baseHeaders,
+      'Content-Length': end - start + 1,
+      'Content-Range': `bytes ${start}-${end}/${total}`,
+    })
+  } else {
+    res.writeHead(200, { ...baseHeaders, 'Content-Length': total })
+  }
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+  if (range) await streamFile(paths.data, range.start, range.end, res)
+  else await streamFile(paths.data, 0, total - 1, res)
+}
+
 async function serveWeb(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { Allow: 'GET, HEAD' })
@@ -127,6 +208,17 @@ async function serveWeb(req, res) {
     res.writeHead(404)
     res.end('Not found')
     return
+  }
+
+  // 资产流式拉流：/SuQCanvas/assets/<assetId>（支持 Range，视频边下边播）。
+  // 注意：Vite 构建的静态 JS/CSS 也位于 /SuQCanvas/assets/ 下（文件名带扩展名），
+  // 仅当剩余路径是纯安全 ID（无点无斜杠）时才按资产处理，避免拦截静态资源。
+  if (pathname.startsWith(`${WEB_BASE}assets/`)) {
+    const rest = pathname.slice((WEB_BASE + 'assets/').length)
+    if (rest && !rest.includes('/') && !rest.includes('.') && isSafeId(rest)) {
+      await serveAsset(req, res, rest)
+      return
+    }
   }
 
   const relativePath = pathname.slice(WEB_BASE.length) || 'index.html'
@@ -172,7 +264,7 @@ httpServer.listen(PORT, '0.0.0.0')
 
 /** @type {Map<import('ws').WebSocket, { id: string, name: string, ip: string, color: string, projectId: string | null }>} */
 const clients = new Map()
-/** @type {Map<string, { meta: any, total: number, handle: import('node:fs/promises').FileHandle | null, tmpPath: string | null, received: number, seen: Set<number> }>} */
+/** @type {Map<string, { meta: any, total: number, handle: import('node:fs/promises').FileHandle | null, tmpPath: string | null, received: number, seen: Set<number>, writeChain: Promise<void> | undefined }>} */
 const pendingAssets = new Map()
 const requestedAssets = new Set()
 
@@ -235,36 +327,39 @@ async function cacheAssetChunk(info, msg) {
     return
   }
 
-  try {
-    if (!pending.handle) {
-      const paths = assetPaths(assetId)
-      pending.tmpPath = `${paths.data}.tmp-${info.id}`
-      pending.handle = await open(pending.tmpPath, 'w')
-    }
-    // 按 index 对应偏移写入，支持乱序到达，且不把整份资产攒在内存里
-    await pending.handle.write(buffer, 0, buffer.length, index * CHUNK_SIZE)
-    pending.received += 1
-    if (pending.received < pending.total) return
+  // 分片可能并发到达，open+write 串行执行，避免并发 open 同一 tmp 文件互相截断
+  pending.writeChain = (pending.writeChain ?? Promise.resolve()).then(async () => {
+    try {
+      if (!pending.handle) {
+        const paths = assetPaths(assetId)
+        pending.tmpPath = `${paths.data}.tmp-${info.id}`
+        pending.handle = await open(pending.tmpPath, 'w')
+      }
+      // 按 index 对应偏移写入，支持乱序到达，且不把整份资产攒在内存里
+      await pending.handle.write(buffer, 0, buffer.length, index * CHUNK_SIZE)
+      pending.received += 1
+      if (pending.received < pending.total) return
 
-    // 所有分块已落盘
-    pendingAssets.delete(key)
-    await pending.handle.sync().catch(() => undefined)
-    await pending.handle.close()
-    pending.handle = null
-    const paths = assetPaths(assetId)
-    await Promise.all([
-      rename(pending.tmpPath, paths.data),
-      writeFile(paths.meta, JSON.stringify({ ...pending.meta, id: assetId }), 'utf8'),
-    ])
-    requestedAssets.delete(assetId)
-  } catch (error) {
-    await pending.handle?.close().catch(() => undefined)
-    pending.handle = null
-    if (pending.tmpPath) await rm(pending.tmpPath, { force: true }).catch(() => undefined)
-    pendingAssets.delete(key)
-    requestedAssets.delete(assetId)
-    console.warn('[SuQCanvas LAN] Failed to cache asset:', error)
-  }
+      // 所有分块已落盘
+      pendingAssets.delete(key)
+      await pending.handle.sync().catch(() => undefined)
+      await pending.handle.close()
+      pending.handle = null
+      const paths = assetPaths(assetId)
+      await Promise.all([
+        rename(pending.tmpPath, paths.data),
+        writeFile(paths.meta, JSON.stringify({ ...pending.meta, id: assetId }), 'utf8'),
+      ])
+      requestedAssets.delete(assetId)
+    } catch (error) {
+      await pending.handle?.close().catch(() => undefined)
+      pending.handle = null
+      if (pending.tmpPath) await rm(pending.tmpPath, { force: true }).catch(() => undefined)
+      pendingAssets.delete(key)
+      requestedAssets.delete(assetId)
+      console.warn('[SuQCanvas LAN] Failed to cache asset:', error)
+    }
+  }).catch(() => undefined)
 }
 
 async function requestMissingProjectAssets(ws, project) {
@@ -281,7 +376,8 @@ async function requestMissingProjectAssets(ws, project) {
     } catch {
       requestedAssets.add(assetId)
       sendTo(ws, { t: 'asset-request', assetId, from: 'server' })
-      setTimeout(() => requestedAssets.delete(assetId), 10000)
+      // 大视频传输可能超过 10s，超时过短会导致传输期间重复广播请求、产生并发传输流
+      setTimeout(() => requestedAssets.delete(assetId), 60000)
     }
   }
 }
@@ -296,6 +392,10 @@ async function sendCachedAsset(ws, assetId) {
       stat(paths.data),
     ])
     const total = Math.max(1, Math.ceil(fileStat.size / CHUNK_SIZE))
+    // 视频类资产通知请求方可直接走 HTTP Range 流式拉取（无需整份 WebSocket 下载）
+    if (String(meta.mime ?? '').startsWith('video/')) {
+      sendTo(ws, { t: 'asset-http', assetId, url: `${WEB_BASE}assets/${assetId}`, from: 'server' })
+    }
     sendTo(ws, { t: 'asset-meta', asset: meta, totalChunks: total, from: 'server' })
     // 分块流式读取发送，不再把整个文件读进内存，避免多客户端并发时内存翻倍
     handle = await open(paths.data, 'r')
@@ -412,13 +512,24 @@ wss.on('connection', (ws, req) => {
       const asset = msg.asset
       const total = Number(msg.totalChunks)
       if (isSafeId(asset?.id) && Number.isInteger(total) && total > 0 && total <= 8192) {
-        pendingAssets.set(`${info.id}:${asset.id}`, {
+        const key = `${info.id}:${asset.id}`
+        const existing = pendingAssets.get(key)
+        // 同源传输已在进行（meta 重发/续传场景）时保留已收分片，不重置
+        if (existing && existing.total === total && existing.seen.size > 0) return
+        // total 变化或全新传输：清理旧的未完成句柄与临时文件
+        if (existing) {
+          void existing.handle?.close().catch(() => undefined)
+          void existing.writeChain?.catch(() => undefined)
+          if (existing.tmpPath) void rm(existing.tmpPath, { force: true }).catch(() => undefined)
+        }
+        pendingAssets.set(key, {
           meta: asset,
           total,
           handle: null,
           tmpPath: null,
           received: 0,
           seen: new Set(),
+          writeChain: undefined,
         })
       }
     }

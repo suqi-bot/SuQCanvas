@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { request as httpRequest, type IncomingHttpHeaders } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebSocket } from 'ws'
@@ -11,6 +12,7 @@ import { useLanStore } from '../store/lanStore'
 import type { SuqNode } from '../types'
 import {
   getDefaultLanUrl,
+  getLanAssetHttpUrl,
   joinLanProject,
   lanConnect,
   lanDisconnect,
@@ -26,6 +28,23 @@ globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket
 const PORT = 9890
 const CHUNK = 262143
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+function httpGet(
+  url: string,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; headers: IncomingHttpHeaders; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(url, { headers }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (c) => chunks.push(c))
+      res.on('end', () =>
+        resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }),
+      )
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
 
 async function connectWhenReady(url: string, timeoutMs = 5000): Promise<WebSocket> {
   const deadline = Date.now() + timeoutMs
@@ -142,6 +161,38 @@ describe('LAN 素材接收', () => {
     expect(Array.from(got)).toEqual(Array.from(src))
   }, 15000)
 
+  it('分片续传：meta 重发后保留已收分片，补齐剩余分片后完整落库', async () => {
+    const src = new Uint8Array(CHUNK * 2 + 9) // 3 个分片
+    for (let i = 0; i < src.length; i++) src[i] = (i * 13 + 3) % 256
+    const parts = encodeChunks(src)
+    const assetR = {
+      id: 'asset-resume',
+      name: 'r.bin',
+      mime: 'application/octet-stream',
+      size: src.length,
+      kind: 'file',
+    }
+    // 第一段：meta + 仅第 0 块（模拟断线前已收部分分片）
+    A.send(JSON.stringify({ t: 'asset-meta', asset: assetR, totalChunks: parts.length }))
+    A.send(
+      JSON.stringify({ t: 'asset-chunk', assetId: 'asset-resume', index: 0, total: parts.length, data: parts[0] }),
+    )
+    await sleep(200)
+    // 续传模拟：meta 重发（应保留已收分片）+ 补齐剩余分片
+    A.send(JSON.stringify({ t: 'asset-meta', asset: assetR, totalChunks: parts.length }))
+    parts.forEach((p, i) => {
+      if (i === 0) return
+      A.send(
+        JSON.stringify({ t: 'asset-chunk', assetId: 'asset-resume', index: i, total: parts.length, data: p }),
+      )
+    })
+    await sleep(1000)
+    const rec = await db.assets.get('asset-resume')
+    expect(rec?.id).toBe('asset-resume')
+    const got = new Uint8Array(await rec!.blob.arrayBuffer())
+    expect(Array.from(got)).toEqual(Array.from(src))
+  }, 15000)
+
   it('请求-响应链路能取回素材（内容一致）', async () => {
     A.on('message', (data, isBinary) => {
       if (isBinary) return
@@ -161,6 +212,57 @@ describe('LAN 素材接收', () => {
     expect(ok).toBe(true)
     const got = new Uint8Array(await rec!.blob.arrayBuffer())
     expect(Array.from(got)).toEqual([0x59, 0x59, 0x58, 0x58])
+  }, 15000)
+})
+
+describe('LAN 资产 HTTP 流式拉流', () => {
+  it('服务器缓存视频后可通过 HTTP Range 流式获取，客户端收到 asset-http 通知', async () => {
+    const len = CHUNK + 100 // 2 个分片，确保文件足够大
+    const src = new Uint8Array(len)
+    for (let i = 0; i < len; i++) src[i] = (i * 7 + 1) % 256
+    const parts = encodeChunks(src)
+    const assetV = {
+      id: 'asset-http-test',
+      name: 'v.mp4',
+      mime: 'video/mp4',
+      size: src.length,
+      kind: 'video',
+    }
+    // 通过 A 把视频推送到服务器缓存
+    A.send(JSON.stringify({ t: 'asset-meta', asset: assetV, totalChunks: parts.length }))
+    parts.forEach((p, i) =>
+      A.send(
+        JSON.stringify({ t: 'asset-chunk', assetId: 'asset-http-test', index: i, total: parts.length, data: p }),
+      ),
+    )
+    await sleep(800) // 等服务器落盘
+
+    const base = `http://127.0.0.1:${PORT}/SuQCanvas/assets/asset-http-test`
+
+    // 整文件 GET
+    const full = await httpGet(base)
+    expect(full.status).toBe(200)
+    expect(full.headers['accept-ranges']).toBe('bytes')
+    expect(full.headers['content-type']).toBe('video/mp4')
+    expect(full.body.length).toBe(len)
+    expect(Array.from(full.body.subarray(0, 64))).toEqual(Array.from(src.subarray(0, 64)))
+
+    // Range 请求
+    const range = await httpGet(base, { Range: 'bytes=10-19' })
+    expect(range.status).toBe(206)
+    expect(range.headers['content-range']).toBe(`bytes 10-19/${len}`)
+    expect(Array.from(range.body)).toEqual(Array.from(src.subarray(10, 20)))
+
+    // 不存在的资产
+    const missing = await httpGet(`http://127.0.0.1:${PORT}/SuQCanvas/assets/asset-http-missing`)
+    expect(missing.status).toBe(404)
+
+    // 客户端请求该视频：服务器应返回 asset-http 通知，客户端记录 HTTP 拉流地址
+    await requestAssetFromLan('asset-http-test')
+    await sleep(500)
+    expect(getLanAssetHttpUrl('asset-http-test')).toBe(
+      `http://127.0.0.1:${PORT}/SuQCanvas/assets/asset-http-test`,
+    )
   }, 15000)
 })
 
