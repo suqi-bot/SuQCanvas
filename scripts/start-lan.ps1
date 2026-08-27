@@ -34,6 +34,14 @@ Write-Host ''
 
 Start-Process 'http://localhost:8790/SuQCanvas/'
 Push-Location $appRoot
+
+# Raise Node heap limit (default 4GB is not enough for large assets / multiple clients)
+if (-not $env:NODE_OPTIONS) {
+  $env:NODE_OPTIONS = '--max-old-space-size=8192'
+} elseif ($env:NODE_OPTIONS -notmatch 'max-old-space-size') {
+  $env:NODE_OPTIONS = "$env:NODE_OPTIONS --max-old-space-size=8192"
+}
+
 try {
   & $nodeExecutable (Join-Path $appRoot 'server\lan-server.mjs')
   exit $LASTEXITCODE

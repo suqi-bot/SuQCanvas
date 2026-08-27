@@ -2,7 +2,7 @@
 // Run: npm run lan (PORT and LAN_DATA_DIR can be overridden with environment variables)
 
 import { createHash, randomUUID } from 'node:crypto'
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { access, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { dirname, extname, join, resolve, sep } from 'node:path'
 import { networkInterfaces } from 'node:os'
@@ -172,7 +172,7 @@ httpServer.listen(PORT, '0.0.0.0')
 
 /** @type {Map<import('ws').WebSocket, { id: string, name: string, ip: string, color: string, projectId: string | null }>} */
 const clients = new Map()
-/** @type {Map<string, { meta: any, total: number, chunks: Array<string | null> }>} */
+/** @type {Map<string, { meta: any, total: number, handle: import('node:fs/promises').FileHandle | null, tmpPath: string | null, received: number, seen: Set<number> }>} */
 const pendingAssets = new Map()
 const requestedAssets = new Set()
 
@@ -225,19 +225,43 @@ async function cacheAssetChunk(info, msg) {
   if (!pending) return
   const index = Number(msg.index)
   if (!Number.isInteger(index) || index < 0 || index >= pending.total) return
-  if (pending.chunks[index] === null) pending.chunks[index] = String(msg.data ?? '')
-  if (pending.chunks.some((chunk) => chunk === null)) return
+  if (pending.seen.has(index)) return
+  pending.seen.add(index)
 
-  pendingAssets.delete(key)
+  let buffer
   try {
+    buffer = Buffer.from(String(msg.data ?? ''), 'base64')
+  } catch {
+    return
+  }
+
+  try {
+    if (!pending.handle) {
+      const paths = assetPaths(assetId)
+      pending.tmpPath = `${paths.data}.tmp-${info.id}`
+      pending.handle = await open(pending.tmpPath, 'w')
+    }
+    // 按 index 对应偏移写入，支持乱序到达，且不把整份资产攒在内存里
+    await pending.handle.write(buffer, 0, buffer.length, index * CHUNK_SIZE)
+    pending.received += 1
+    if (pending.received < pending.total) return
+
+    // 所有分块已落盘
+    pendingAssets.delete(key)
+    await pending.handle.sync().catch(() => undefined)
+    await pending.handle.close()
+    pending.handle = null
     const paths = assetPaths(assetId)
-    const bytes = Buffer.from(pending.chunks.join(''), 'base64')
     await Promise.all([
-      writeFile(paths.data, bytes),
+      rename(pending.tmpPath, paths.data),
       writeFile(paths.meta, JSON.stringify({ ...pending.meta, id: assetId }), 'utf8'),
     ])
     requestedAssets.delete(assetId)
   } catch (error) {
+    await pending.handle?.close().catch(() => undefined)
+    pending.handle = null
+    if (pending.tmpPath) await rm(pending.tmpPath, { force: true }).catch(() => undefined)
+    pendingAssets.delete(key)
     requestedAssets.delete(assetId)
     console.warn('[SuQCanvas LAN] Failed to cache asset:', error)
   }
@@ -264,16 +288,22 @@ async function requestMissingProjectAssets(ws, project) {
 
 async function sendCachedAsset(ws, assetId) {
   if (!isSafeId(assetId)) return false
+  let handle
   try {
     const paths = assetPaths(assetId)
-    const [meta, bytes] = await Promise.all([
+    const [meta, fileStat] = await Promise.all([
       readFile(paths.meta, 'utf8').then(JSON.parse),
-      readFile(paths.data),
+      stat(paths.data),
     ])
-    const total = Math.max(1, Math.ceil(bytes.length / CHUNK_SIZE))
+    const total = Math.max(1, Math.ceil(fileStat.size / CHUNK_SIZE))
     sendTo(ws, { t: 'asset-meta', asset: meta, totalChunks: total, from: 'server' })
+    // 分块流式读取发送，不再把整个文件读进内存，避免多客户端并发时内存翻倍
+    handle = await open(paths.data, 'r')
+    const buf = Buffer.allocUnsafe(CHUNK_SIZE)
     for (let index = 0; index < total; index++) {
-      const chunk = bytes.subarray(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE)
+      const { bytesRead } = await handle.read(buf, 0, CHUNK_SIZE, index * CHUNK_SIZE)
+      if (bytesRead <= 0) break
+      const chunk = bytesRead === CHUNK_SIZE ? buf : buf.subarray(0, bytesRead)
       sendTo(ws, {
         t: 'asset-chunk',
         assetId,
@@ -286,6 +316,8 @@ async function sendCachedAsset(ws, assetId) {
     return true
   } catch {
     return false
+  } finally {
+    if (handle) await handle.close().catch(() => undefined)
   }
 }
 
@@ -383,7 +415,10 @@ wss.on('connection', (ws, req) => {
         pendingAssets.set(`${info.id}:${asset.id}`, {
           meta: asset,
           total,
-          chunks: new Array(total).fill(null),
+          handle: null,
+          tmpPath: null,
+          received: 0,
+          seen: new Set(),
         })
       }
     }
@@ -421,7 +456,11 @@ wss.on('connection', (ws, req) => {
     const projectId = info.projectId
     clients.delete(ws)
     for (const key of pendingAssets.keys()) {
-      if (key.startsWith(`${info.id}:`)) pendingAssets.delete(key)
+      if (!key.startsWith(`${info.id}:`)) continue
+      const pending = pendingAssets.get(key)
+      if (pending?.handle) void pending.handle.close().catch(() => undefined)
+      if (pending?.tmpPath) void rm(pending.tmpPath, { force: true }).catch(() => undefined)
+      pendingAssets.delete(key)
     }
     if (projectId) broadcast({ t: 'leave', id: info.id }, undefined, projectId)
     broadcastUsers()
