@@ -14,6 +14,7 @@ import {
   ExitFullscreenIcon,
   ForwardIcon,
   FullscreenIcon,
+  MoonIcon,
   MuteIcon,
   NextIcon,
   PauseIcon,
@@ -23,15 +24,17 @@ import {
   QueueIcon,
   RewindIcon,
   SearchIcon,
+  SunIcon,
   VideoIcon,
   VolumeIcon,
 } from '../canvas/nodes/Icons'
 import { db } from '../db/db'
-import { getThumbnailUrl } from '../media/blobRegistry'
+import { getAssetUrl, getThumbnailUrl } from '../media/blobRegistry'
 import { registerVideo } from '../media/mediaCoordinator'
 import type { ManagedFile } from '../media/managedFile'
 import { useAssetUrl } from '../media/useAssetUrl'
 import { usePlayerStore } from '../store/playerStore'
+import { useSettingsStore } from '../store/settingsStore'
 import { toast } from '../store/uiStore'
 
 const SEEK_STEP = 10
@@ -66,6 +69,10 @@ export function VideoPlayerView({
   const videoFiles = useMemo(() => files.filter((file) => file.kind === 'video'), [files])
   const [currentId, setCurrentId] = useState(initialAssetId)
   const url = useAssetUrl(currentId)
+
+  // 早晚主题（与工具栏共用同一开关）
+  const theme = useSettingsStore((state) => state.theme)
+  const toggleTheme = useSettingsStore((state) => state.toggleTheme)
 
   // 当前视频文件
   const current = useMemo(
@@ -105,6 +112,54 @@ export function VideoPlayerView({
     })
     return () => {
       alive = false
+    }
+  }, [videoFiles])
+
+  // 批量探测视频时长（列表项缩略图上的时长角标；仅读元数据，不下载完整文件）
+  const [durations, setDurations] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    if (videoFiles.length === 0) return
+    let alive = true
+    const probes: HTMLVideoElement[] = []
+    void Promise.all(
+      videoFiles.map(async (file) => {
+        try {
+          const assetUrl = await getAssetUrl(file.assetId)
+          const probe = document.createElement('video')
+          probe.preload = 'metadata'
+          probe.muted = true
+          probes.push(probe)
+          const duration = await new Promise<string>((resolve) => {
+            probe.onloadedmetadata = () => {
+              resolve(Number.isFinite(probe.duration) && probe.duration > 0 ? formatTime(probe.duration) : '')
+            }
+            probe.onerror = () => resolve('')
+            probe.src = assetUrl
+          })
+          return duration ? ([file.assetId, duration] as const) : null
+        } catch {
+          return null
+        }
+      }),
+    ).then((entries) => {
+      if (!alive) return
+      setDurations(
+        new Map(
+          entries.filter((entry): entry is readonly [string, string] => Boolean(entry)),
+        ),
+      )
+    }).finally(() => {
+      probes.forEach((probe) => {
+        probe.removeAttribute('src')
+        probe.load()
+      })
+    })
+    return () => {
+      alive = false
+      probes.forEach((probe) => {
+        probe.removeAttribute('src')
+        probe.load()
+      })
     }
   }, [videoFiles])
 
@@ -292,9 +347,9 @@ export function VideoPlayerView({
     }
   }, [])
 
-  // 播放中鼠标闲置自动隐藏控制栏；暂停 / 菜单 / 列表打开时保持显示
+  // 全屏时：顶栏/底栏随鼠标移动显示，闲置后自动隐藏；非全屏保持常驻
   useEffect(() => {
-    if (!playing) {
+    if (!fullscreen) {
       setControlsVisible(true)
       return
     }
@@ -302,21 +357,19 @@ export function VideoPlayerView({
     const show = () => {
       setControlsVisible(true)
       window.clearTimeout(timer)
-      timer = window.setTimeout(() => setControlsVisible(false), 2600)
+      timer = window.setTimeout(() => setControlsVisible(false), 2200)
     }
     show()
     window.addEventListener('mousemove', show)
     window.addEventListener('mousedown', show)
+    window.addEventListener('touchstart', show)
     return () => {
       window.removeEventListener('mousemove', show)
       window.removeEventListener('mousedown', show)
+      window.removeEventListener('touchstart', show)
       window.clearTimeout(timer)
     }
-  }, [playing])
-
-  useEffect(() => {
-    if (rateMenuOpen || listOpen) setControlsVisible(true)
-  }, [rateMenuOpen, listOpen])
+  }, [fullscreen])
 
   // ---- 键盘快捷键 ----
   useEffect(() => {
@@ -445,7 +498,7 @@ export function VideoPlayerView({
   return (
     <div
       ref={containerRef}
-      className={`fixed inset-0 z-[100] flex flex-col overflow-hidden bg-[#04060a] ${!controlsVisible ? 'cursor-none' : ''}`}
+      className={`fixed inset-0 z-[100] flex flex-col overflow-hidden bg-[#04060a] ${fullscreen && !controlsVisible ? 'cursor-none' : ''}`}
     >
       {/* 氛围背景：当前视频封面模糊铺满 + 上下渐变 */}
       <div className="absolute inset-0" aria-hidden>
@@ -462,31 +515,31 @@ export function VideoPlayerView({
         <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/5 to-black/60" />
       </div>
 
-      {/* 顶栏 */}
+      {/* 顶栏：非全屏常驻布局；全屏时覆盖在视频上层，随鼠标移动显示，闲置隐藏 */}
       <header
-        className={`relative z-10 flex items-center gap-3 px-5 pt-5 transition-opacity duration-300 ${controlsVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+        className={`flex items-center gap-3 border-b border-edge bg-panel px-4 py-3 transition-opacity duration-300 sm:px-5 ${fullscreen ? 'absolute left-0 right-0 top-0 z-30' : 'relative z-10'} ${fullscreen && !controlsVisible ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
       >
         <button
           type="button"
           onClick={onBack}
-          className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-3.5 py-2 text-xs text-white/85 backdrop-blur-md transition-colors hover:bg-black/50 hover:text-white"
+          className="flex items-center gap-1.5 rounded-full border border-edge bg-panel2 px-3.5 py-2 text-xs text-main transition-colors hover:bg-hover hover:text-main"
         >
           <ChevronLeftIcon className="h-3.5 w-3.5" />
           返回
         </button>
-        <h1 className="min-w-0 truncate text-sm font-medium text-white/85" title={name}>
+        <h1 className="min-w-0 truncate text-sm font-medium text-main" title={name}>
           {name}
         </h1>
         <div className="flex-1" />
         {!fullscreen && (
           <>
-            <span className="hidden rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-xs text-white/70 backdrop-blur-md sm:inline">
+            <span className="hidden rounded-full border border-edge bg-panel2 px-3 py-1.5 text-xs text-dim sm:inline">
               共 {videoFiles.length} 个视频
             </span>
             <button
               type="button"
               onClick={() => setListOpen((value) => !value)}
-              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs backdrop-blur-md transition-colors ${listOpen ? 'border-transparent bg-sky-500 text-slate-950' : 'border-white/10 bg-black/30 text-white/85 hover:bg-black/50 hover:text-white'}`}
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${listOpen ? 'border-transparent bg-sky-500 text-slate-950' : 'border-edge bg-panel2 text-main hover:bg-hover hover:text-main'}`}
               title="视频列表"
             >
               <QueueIcon className="h-3.5 w-3.5" />
@@ -496,10 +549,18 @@ export function VideoPlayerView({
         )}
         <button
           type="button"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
+          className="rounded-full border border-edge bg-panel2 p-2.5 text-main transition-colors hover:bg-hover hover:text-main"
+        >
+          {theme === 'dark' ? <SunIcon className="h-4 w-4" /> : <MoonIcon className="h-4 w-4" />}
+        </button>
+        <button
+          type="button"
           onClick={() => void downloadCurrent()}
           title="下载视频"
           aria-label="下载视频"
-          className="rounded-full border border-white/10 bg-black/30 p-2.5 text-white/85 backdrop-blur-md transition-colors hover:bg-black/50 hover:text-white"
+          className="rounded-full border border-edge bg-panel2 p-2.5 text-main transition-colors hover:bg-hover hover:text-main"
         >
           <DownloadIcon />
         </button>
@@ -508,19 +569,19 @@ export function VideoPlayerView({
           onClick={onClose}
           title="关闭"
           aria-label="关闭播放器"
-          className="rounded-full border border-white/10 bg-black/30 p-2.5 text-white/85 backdrop-blur-md transition-colors hover:bg-black/50 hover:text-white"
+          className="rounded-full border border-edge bg-panel2 p-2.5 text-main transition-colors hover:bg-hover hover:text-main"
         >
           <CloseIcon />
         </button>
       </header>
 
-      {/* 主体：左侧视频列 + 右侧常驻列表 */}
-      <div className="relative z-10 flex min-h-0 flex-1">
-        {/* 左侧列：视频画面 + 底部控制栏 */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* 视频区：点击切换播放/暂停 */}
+      {/* 主体：左侧视频列 + 右侧常驻列表；全屏时铺满整个画面 */}
+      <div className={`${fullscreen ? 'absolute inset-0 z-10' : 'relative z-10 flex min-h-0 flex-1'}`}>
+        {/* 左侧列：视频画面 + 底部控制栏；全屏时铺满 */}
+        <div className={`${fullscreen ? 'absolute inset-0' : 'flex min-h-0 min-w-0 flex-1 flex-col'}`}>
+          {/* 视频区：点击切换播放/暂停；全屏时铺满画面但保持视频纵横比（内容完整不裁剪），非全屏黑色垫底占满左侧空间 */}
           <div
-            className="relative flex min-h-0 flex-1 items-center justify-center px-4 pt-4 sm:px-6"
+            className={`${fullscreen ? 'absolute inset-0 flex items-center justify-center overflow-hidden bg-black' : 'relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black px-2 pt-2 sm:px-4 sm:pt-3'}`}
             onClick={toggle}
             title={playing ? '点击暂停' : '点击播放'}
           >
@@ -553,14 +614,15 @@ export function VideoPlayerView({
         )}
       </div>
 
-          {/* 底部控制栏 */}
+          {/* 底部控制栏：纯色面板，响应早晚主题；非全屏常驻布局，全屏时覆盖在视频上层，随鼠标移动显示 */}
           <footer
-            className={`px-4 pb-4 pt-2 transition-opacity duration-300 sm:px-6 sm:pb-5 ${controlsVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+            className={`border-t border-edge bg-panel px-4 py-3 transition-opacity duration-300 sm:px-6 sm:py-4 ${fullscreen ? 'absolute bottom-0 left-0 right-0 z-30' : ''} ${fullscreen && !controlsVisible ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
           >
-        <div className="mx-auto max-w-4xl rounded-2xl border border-white/10 bg-black/35 px-5 py-3.5 shadow-2xl backdrop-blur-xl">
+            <div className="transition-opacity duration-300 opacity-100">
+        <div className="w-full">
           {/* 进度行 */}
           <div className="flex items-center gap-3">
-            <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-white/55">
+            <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-dim">
               {formatTime(progressTime)}
             </span>
             <div
@@ -580,9 +642,9 @@ export function VideoPlayerView({
               onPointerCancel={onSeekPointerUp}
               className={`group relative flex h-5 flex-1 cursor-pointer touch-none items-center py-1.5 ${seekDragging ? 'cursor-grabbing' : ''}`}
             >
-              <div className="relative h-1 w-full overflow-hidden rounded-full bg-white/15 transition-[height] group-hover:h-1.5">
+              <div className="relative h-1 w-full overflow-hidden rounded-full bg-edge2/60 transition-[height] group-hover:h-1.5">
                 <div
-                  className="absolute inset-y-0 left-0 bg-white/25"
+                  className="absolute inset-y-0 left-0 bg-mid/40"
                   style={{ width: `${bufferedPct}%` }}
                 />
                 <div
@@ -591,11 +653,11 @@ export function VideoPlayerView({
                 />
               </div>
               <div
-                className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_4px_rgba(56,189,248,0.25)] transition-opacity ${seekDragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-main shadow-[0_0_0_4px_rgba(56,189,248,0.25)] transition-opacity ${seekDragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                 style={{ left: `${progress}%` }}
               />
             </div>
-            <span className="w-12 shrink-0 text-[11px] tabular-nums text-white/55">
+            <span className="w-12 shrink-0 text-[11px] tabular-nums text-dim">
               {formatTime(duration)}
             </span>
           </div>
@@ -606,7 +668,7 @@ export function VideoPlayerView({
               <button
                 type="button"
                 onClick={toggleMute}
-                className="rounded-full p-2 text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+                className="rounded-full p-2 text-mid transition-colors hover:bg-hover hover:text-main"
                 title={muted || volume === 0 ? '取消静音' : '静音'}
               >
                 {muted || volume === 0 ? <MuteIcon /> : <VolumeIcon />}
@@ -626,7 +688,7 @@ export function VideoPlayerView({
                 <button
                   type="button"
                   onClick={() => setRateMenuOpen((value) => !value)}
-                  className={`rounded-full px-2.5 py-1.5 text-[11px] tabular-nums transition-colors ${rateMenuOpen ? 'bg-sky-500 text-slate-950' : 'text-white/75 hover:bg-white/10 hover:text-white'}`}
+                  className={`rounded-full px-2.5 py-1.5 text-[11px] tabular-nums transition-colors ${rateMenuOpen ? 'bg-sky-500 text-slate-950' : 'text-mid hover:bg-hover hover:text-main'}`}
                   title="播放速度"
                 >
                   {rate}x
@@ -634,13 +696,13 @@ export function VideoPlayerView({
                 {rateMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setRateMenuOpen(false)} />
-                    <div className="absolute bottom-full left-0 z-20 mb-2 w-24 overflow-hidden rounded-lg border border-white/10 bg-[#0b1220]/95 py-1 shadow-2xl backdrop-blur-xl">
+                    <div className="absolute bottom-full left-0 z-20 mb-2 w-24 overflow-hidden rounded-lg border border-edge bg-panel py-1 shadow-2xl">
                       {RATES.map((value) => (
                         <button
                           key={value}
                           type="button"
                           onClick={() => applyRate(value)}
-                          className={`block w-full px-3 py-1.5 text-left text-xs transition-colors ${value === rate ? 'bg-sky-500/15 font-medium text-sky-400' : 'text-white/75 hover:bg-white/10 hover:text-white'}`}
+                          className={`block w-full px-3 py-1.5 text-left text-xs transition-colors ${value === rate ? 'bg-sky-500/15 font-medium text-sky-400' : 'text-mid hover:bg-hover hover:text-main'}`}
                         >
                           {value}x
                         </button>
@@ -655,7 +717,7 @@ export function VideoPlayerView({
               <button
                 type="button"
                 onClick={playPrev}
-                className="rounded-full p-2 text-white/75 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30"
+                className="rounded-full p-2 text-mid transition-colors hover:bg-hover hover:text-main disabled:opacity-30"
                 title="上一集"
                 disabled={videoFiles.length < 2}
               >
@@ -664,7 +726,7 @@ export function VideoPlayerView({
               <button
                 type="button"
                 onClick={() => seekBy(-SEEK_STEP)}
-                className="rounded-full p-2 text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+                className="rounded-full p-2 text-mid transition-colors hover:bg-hover hover:text-main"
                 title={`快退 ${SEEK_STEP} 秒`}
               >
                 <RewindIcon className="h-5 w-5" />
@@ -680,7 +742,7 @@ export function VideoPlayerView({
               <button
                 type="button"
                 onClick={() => seekBy(SEEK_STEP)}
-                className="rounded-full p-2 text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+                className="rounded-full p-2 text-mid transition-colors hover:bg-hover hover:text-main"
                 title={`快进 ${SEEK_STEP} 秒`}
               >
                 <ForwardIcon className="h-5 w-5" />
@@ -688,7 +750,7 @@ export function VideoPlayerView({
               <button
                 type="button"
                 onClick={playNext}
-                className="rounded-full p-2 text-white/75 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30"
+                className="rounded-full p-2 text-mid transition-colors hover:bg-hover hover:text-main disabled:opacity-30"
                 title="下一集"
                 disabled={videoFiles.length < 2}
               >
@@ -700,7 +762,7 @@ export function VideoPlayerView({
               <button
                 type="button"
                 onClick={() => void togglePip()}
-                className={`rounded-full p-2 transition-colors ${pip ? 'bg-sky-500 text-slate-950' : 'text-white/75 hover:bg-white/10 hover:text-white'}`}
+                className={`rounded-full p-2 transition-colors ${pip ? 'bg-sky-500 text-slate-950' : 'text-mid hover:bg-hover hover:text-main'}`}
                 title={pip ? '退出画中画' : '画中画'}
               >
                 <PiPIcon className="h-4 w-4" />
@@ -708,7 +770,7 @@ export function VideoPlayerView({
               <button
                 type="button"
                 onClick={toggleFullscreen}
-                className="rounded-full p-2 text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+                className="rounded-full p-2 text-mid transition-colors hover:bg-hover hover:text-main"
                 title={fullscreen ? '退出全屏' : '全屏'}
               >
                 {fullscreen ? <ExitFullscreenIcon className="h-4 w-4" /> : <FullscreenIcon className="h-4 w-4" />}
@@ -716,12 +778,13 @@ export function VideoPlayerView({
             </div>
           </div>
         </div>
+          </div>
         </footer>
         </div>
 
-        {/* 右侧常驻列表（全屏时隐藏） */}
+        {/* 右侧常驻列表（全屏时隐藏）：B 站风格，响应式宽度，小屏更窄优先保证视频区占满 */}
         {listOpen && !fullscreen && (
-          <aside className="flex w-72 shrink-0 flex-col border-l border-edge bg-panel/95 backdrop-blur sm:w-80">
+          <aside className="flex w-64 shrink-0 flex-col border-l border-edge bg-panel/95 backdrop-blur sm:w-72 xl:w-96">
             <div className="flex items-center gap-1 border-b border-edge px-2 py-2">
               <span className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-xs font-medium text-main">
                 <VideoIcon className="h-3.5 w-3.5 shrink-0 text-sky-400" />
@@ -764,15 +827,23 @@ export function VideoPlayerView({
               {visibleFiles.length > 0 ? (
                 visibleFiles.map((file) => {
                   const isActive = file.assetId === currentId
+                  const durationText = durations.get(file.assetId)
                   return (
                     <button
                       key={file.assetId}
                       type="button"
                       onClick={() => switchTo(file.assetId)}
-                      className={`group flex w-full items-center gap-2.5 rounded-lg py-2 pl-1 pr-2.5 text-left transition-colors ${isActive ? 'bg-sky-500/15' : 'hover:bg-hover'}`}
+                      className={`group relative flex w-full items-start gap-3 rounded-lg py-2 pl-3 pr-2.5 text-left transition-colors ${isActive ? 'bg-sky-500/15' : 'hover:bg-hover'}`}
                       title={isActive ? `正在播放：${file.name}` : `播放：${file.name}`}
                     >
-                      <span className="relative h-10 w-16 shrink-0 overflow-hidden rounded-md bg-panel2">
+                      {isActive && (
+                        <span className="absolute bottom-3 left-0 top-3 w-0.5 rounded-full bg-sky-400" />
+                      )}
+                      {/* 16:9 缩略图 + 时长角标 */}
+                      <span
+                        className="relative w-32 shrink-0 overflow-hidden rounded-lg bg-panel2"
+                        style={{ aspectRatio: '16 / 9' }}
+                      >
                         {thumbs.get(file.assetId) ? (
                           <img
                             src={thumbs.get(file.assetId)}
@@ -782,26 +853,36 @@ export function VideoPlayerView({
                           />
                         ) : (
                           <span className="flex h-full w-full items-center justify-center">
-                            <VideoIcon className="h-4 w-4 text-dim" />
+                            <VideoIcon className="h-5 w-5 text-dim" />
+                          </span>
+                        )}
+                        {durationText && (
+                          <span className="absolute bottom-1 right-1 rounded bg-black/75 px-1 py-px text-[10px] tabular-nums leading-tight text-white">
+                            {durationText}
                           </span>
                         )}
                         {isActive && (
                           <span className="absolute inset-0 flex items-center justify-center bg-black/45">
-                            {playing ? <PauseIcon className="h-4 w-4 text-white" /> : <PlayIcon className="h-4 w-4 text-white" />}
+                            {playing ? (
+                              <PauseIcon className="h-5 w-5 text-white" />
+                            ) : (
+                              <PlayIcon className="h-5 w-5 text-white" />
+                            )}
                           </span>
                         )}
                       </span>
-                      <span className="min-w-0 flex-1">
-                        <span className={`block truncate text-xs ${isActive ? 'font-medium text-sky-400' : 'text-main'}`}>
+                      {/* 标题 + 作者 */}
+                      <span className="min-w-0 flex-1 py-0.5">
+                        <span className={`line-clamp-2 text-xs leading-[1.4] ${isActive ? 'font-medium text-sky-400' : 'text-main'}`}>
                           {file.name}
                         </span>
-                        <span className="block truncate text-[10px] text-dim">
+                        <span className="mt-1 block truncate text-[10px] text-dim">
                           {file.nodes[0]?.data.createdByName ?? '未知'}
                         </span>
+                        {isActive && (
+                          <span className="mt-1 block text-[10px] text-sky-400">{playing ? '播放中' : '已暂停'}</span>
+                        )}
                       </span>
-                      {isActive && (
-                        <span className="shrink-0 text-[10px] text-sky-400">{playing ? '播放中' : '已暂停'}</span>
-                      )}
                     </button>
                   )
                 })

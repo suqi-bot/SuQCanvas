@@ -58,6 +58,8 @@
   --ctrlbg: #1e293b;
   --ctrlborder: #334155;
   --ctrlfg: #94a3b8;
+  --sq-track: rgba(255, 255, 255, 0.14);
+  --sq-thumb: #ffffff;
   --toastinfo-bg: #1e293b;
   --toastinfo-border: #334155;
   --toastinfo-fg: #e2e8f0;
@@ -105,6 +107,8 @@ html.light {
   --ctrlbg: #ffffff;
   --ctrlborder: #e2e8f0;
   --ctrlfg: #475569;
+  --sq-track: rgba(15, 23, 42, 0.14);
+  --sq-thumb: #475569;
   --toastinfo-bg: #ffffff;
   --toastinfo-border: #e2e8f0;
   --toastinfo-fg: #1e293b;
@@ -400,7 +404,7 @@ body {
   appearance: none;
   height: 5px;
   border-radius: 9999px;
-  background: linear-gradient(to right, var(--sq-accent, #38bdf8) var(--sq-fill, 0%), rgba(255, 255, 255, 0.14) var(--sq-fill, 0%));
+  background: linear-gradient(to right, var(--sq-accent, #38bdf8) var(--sq-fill, 0%), var(--sq-track, rgba(255, 255, 255, 0.14)) var(--sq-fill, 0%));
   outline: none;
   cursor: pointer;
 }
@@ -411,7 +415,7 @@ body {
   width: 13px;
   height: 13px;
   border-radius: 9999px;
-  background: #fff;
+  background: var(--sq-thumb, #fff);
   border: none;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--sq-accent, #38bdf8) 32%, transparent), 0 2px 10px rgba(0, 0, 0, 0.55);
   transition: transform 0.12s ease;
@@ -425,7 +429,7 @@ body {
   width: 13px;
   height: 13px;
   border-radius: 9999px;
-  background: #fff;
+  background: var(--sq-thumb, #fff);
   border: none;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--sq-accent, #38bdf8) 32%, transparent), 0 2px 10px rgba(0, 0, 0, 0.55);
 }
