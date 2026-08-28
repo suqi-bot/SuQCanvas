@@ -78,7 +78,16 @@ npm run lan:open
 ```text
 server/data/projects.json  # 共享项目数据
 server/data/assets/        # 项目素材
+server/data/backups/       # 已删除项目的 24 小时备份
 ```
+
+**项目所有权与保留策略：**
+
+- 项目首次保存时由中继盖章创建者（设备 ID 持久化在浏览器 localStorage），只有创建者可以删除项目
+- 删除项目时，服务器自动在 `backups/` 目录保留 24 小时备份，超期后由维护任务自动清理
+- 未被任何项目引用的素材同样保留 24 小时后清理；重新被引用则自动取消清理标记
+- 本地 IndexedDB 中的素材也遵循相同的 24 小时宽限期
+- 误删项目可在首页点击「恢复已删除」查看 24 小时内的备份并一键恢复，仅创建者可操作
 
 这就是局域网项目的主副本，建议定期备份整个 `server/data/`。如需放到独立数据盘，可在启动前设置
 `LAN_DATA_DIR`（例如 Windows PowerShell：`$env:LAN_DATA_DIR='D:\SuQCanvasData'; npm run lan`）。

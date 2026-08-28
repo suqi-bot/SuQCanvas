@@ -3,7 +3,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { access, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { dirname, extname, join, resolve, sep } from 'node:path'
 import { networkInterfaces } from 'node:os'
@@ -15,9 +15,13 @@ const serverDir = dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = resolve(process.env.LAN_DATA_DIR || join(serverDir, 'data'))
 const PROJECTS_FILE = join(DATA_DIR, 'projects.json')
 const ASSETS_DIR = join(DATA_DIR, 'assets')
+const BACKUP_PROJECTS_DIR = join(DATA_DIR, 'backups', 'projects')
+const ASSETS_PENDING_FILE = join(DATA_DIR, 'assets-pending-delete.json')
 const WEB_ROOT = resolve(process.env.LAN_WEB_ROOT || join(serverDir, '..', 'dist-lan'))
 const CHUNK_SIZE = 262143
 const WEB_BASE = '/SuQCanvas/'
+const RETENTION_MS = 24 * 60 * 60 * 1000
+const MAINTENANCE_INTERVAL_MS = 60 * 60 * 1000
 const USER_COLORS = [
   '#0284c7', '#ea580c', '#16a34a', '#e11d48', '#9333ea', '#ca8a04',
   '#0d9488', '#db2777', '#4f46e5', '#65a30d', '#dc2626', '#0891b2',
@@ -37,6 +41,7 @@ const MIME_TYPES = {
 }
 
 await mkdir(ASSETS_DIR, { recursive: true })
+await mkdir(BACKUP_PROJECTS_DIR, { recursive: true })
 
 /** @type {Map<string, any>} */
 const projects = new Map()
@@ -49,6 +54,14 @@ try {
   if (error?.code !== 'ENOENT') console.warn('[SuQCanvas LAN] Failed to load projects:', error)
 }
 
+/** @type {Record<string, number>} assetId -> firstOrphanedAt */
+let orphanMarks = {}
+try {
+  orphanMarks = JSON.parse(await readFile(ASSETS_PENDING_FILE, 'utf8'))
+} catch (error) {
+  if (error?.code !== 'ENOENT') console.warn('[SuQCanvas LAN] Failed to load orphan marks:', error)
+}
+
 let projectWrite = Promise.resolve()
 function persistProjects() {
   const payload = JSON.stringify([...projects.values()], null, 2)
@@ -58,6 +71,138 @@ function persistProjects() {
     .catch((error) => console.error('[SuQCanvas LAN] Failed to save projects:', error))
   return projectWrite
 }
+
+let orphanWrite = Promise.resolve()
+function persistOrphanMarks() {
+  const payload = JSON.stringify(orphanMarks, null, 2)
+  orphanWrite = orphanWrite
+    .catch(() => undefined)
+    .then(() => writeFile(ASSETS_PENDING_FILE, payload, 'utf8'))
+    .catch((error) => console.error('[SuQCanvas LAN] Failed to save orphan marks:', error))
+  return orphanWrite
+}
+
+function referencedAssetIds() {
+  const set = new Set()
+  for (const project of projects.values()) {
+    for (const node of project.graph.nodes) {
+      const a = node?.data?.assetId
+      const c = node?.data?.coverAssetId
+      if (isSafeId(a)) set.add(a)
+      if (isSafeId(c)) set.add(c)
+    }
+  }
+  return set
+}
+
+function inFlightAssetIds() {
+  const set = new Set(requestedAssets)
+  for (const key of pendingAssets.keys()) {
+    const assetId = key.slice(key.indexOf(':') + 1)
+    if (isSafeId(assetId)) set.add(assetId)
+  }
+  return set
+}
+
+async function runMaintenance() {
+  const now = Date.now()
+  let changed = false
+
+  // 1. Backup expiry: delete backups older than RETENTION_MS
+  try {
+    const backups = await readdir(BACKUP_PROJECTS_DIR)
+    for (const file of backups) {
+      if (!file.endsWith('.json')) continue
+      const match = file.match(/^(.+)_(\d+)\.json$/)
+      if (!match) continue
+      const timestamp = Number(match[2])
+      if (now - timestamp > RETENTION_MS) {
+        await rm(join(BACKUP_PROJECTS_DIR, file), { force: true })
+        console.log(`[SuQCanvas LAN] Expired backup removed: ${file}`)
+      }
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') console.warn('[SuQCanvas LAN] Failed to scan backups:', error)
+  }
+
+  // 2. Asset GC: mark unreferenced assets, delete those marked >24h
+  const referenced = referencedAssetIds()
+  const inFlight = inFlightAssetIds()
+
+  try {
+    const assetFiles = await readdir(ASSETS_DIR)
+    const metaFiles = assetFiles.filter((f) => f.endsWith('.json'))
+
+    for (const metaFile of metaFiles) {
+      let meta
+      try {
+        meta = JSON.parse(await readFile(join(ASSETS_DIR, metaFile), 'utf8'))
+      } catch {
+        continue
+      }
+      const assetId = meta?.id
+      if (!isSafeId(assetId)) continue
+
+      const paths = assetPaths(assetId)
+      const isReferenced = referenced.has(assetId)
+      const isInFlight = inFlight.has(assetId)
+
+      if (isReferenced) {
+        // Asset is referenced: clear orphan mark if exists
+        if (orphanMarks[assetId] !== undefined) {
+          delete orphanMarks[assetId]
+          changed = true
+        }
+      } else if (isInFlight) {
+        // Asset is being transferred: skip marking
+        continue
+      } else if (orphanMarks[assetId] !== undefined) {
+        // Asset is unreferenced and already marked
+        if (now - orphanMarks[assetId] > RETENTION_MS) {
+          // Delete the asset files
+          await rm(paths.data, { force: true })
+          await rm(paths.meta, { force: true })
+          await rm(paths.thumb, { force: true })
+          delete orphanMarks[assetId]
+          changed = true
+          console.log(`[SuQCanvas LAN] Orphaned asset deleted: ${assetId}`)
+        }
+      } else {
+        // Asset is unreferenced and not yet marked: mark it
+        orphanMarks[assetId] = now
+        changed = true
+      }
+    }
+
+    // Clean up ledger entries for assets that no longer exist
+    for (const assetId of Object.keys(orphanMarks)) {
+      const paths = assetPaths(assetId)
+      try {
+        await access(paths.meta)
+      } catch {
+        delete orphanMarks[assetId]
+        changed = true
+      }
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') console.warn('[SuQCanvas LAN] Failed to scan assets:', error)
+  }
+
+  if (changed) void persistOrphanMarks()
+}
+
+let maintenanceTimer = null
+function scheduleMaintenance() {
+  if (maintenanceTimer) return
+  maintenanceTimer = setTimeout(() => {
+    maintenanceTimer = null
+    void runMaintenance()
+  }, 5000)
+}
+
+// Start maintenance: run once at startup, then hourly
+void runMaintenance()
+setInterval(() => void runMaintenance(), MAINTENANCE_INTERVAL_MS)
 
 function isSafeId(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value)
@@ -90,8 +235,44 @@ function normalizeProject(value) {
 
 function projectList() {
   return [...projects.values()]
-    .map(({ id, name, updatedAt }) => ({ id, name, updatedAt }))
+    .map(({ id, name, updatedAt, creatorId }) => ({ id, name, updatedAt, ...(creatorId ? { creatorId } : {}) }))
     .sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+async function listProjectBackups() {
+  const now = Date.now()
+  const result = []
+  let files
+  try {
+    files = await readdir(BACKUP_PROJECTS_DIR)
+  } catch {
+    return result
+  }
+  for (const file of files) {
+    if (!file.endsWith('.json')) continue
+    const match = file.match(/^(.+)_(\d+)\.json$/)
+    if (!match) continue
+    const projectId = match[1]
+    const deletedAt = Number(match[2])
+    if (!isSafeId(projectId) || !Number.isFinite(deletedAt)) continue
+    if (now - deletedAt > RETENTION_MS) continue
+    let project
+    try {
+      project = JSON.parse(await readFile(join(BACKUP_PROJECTS_DIR, file), 'utf8'))
+    } catch {
+      continue
+    }
+    if (!isProject(project) || project.id !== projectId) continue
+    result.push({
+      projectId,
+      name: project.name,
+      deletedAt,
+      ...(project.creatorId ? { creatorId: project.creatorId } : {}),
+      nodeCount: project.graph.nodes.length,
+    })
+  }
+  result.sort((a, b) => b.deletedAt - a.deletedAt)
+  return result
 }
 
 function assetKey(id) {
@@ -482,7 +663,7 @@ wss.on('connection', (ws, req) => {
   const forwardedIp = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0]
   const ip = (forwardedIp?.trim() || req.socket.remoteAddress || '').replace(/^::ffff:/, '')
   const id = randomUUID()
-  const info = { id, name: `设备-${id.slice(0, 4)}`, ip, color: nextUserColor(), projectId: null }
+  const info = { id, name: `设备-${id.slice(0, 4)}`, ip, color: nextUserColor(), projectId: null, deviceId: null }
   clients.set(ws, info)
 
   sendTo(ws, { t: 'welcome', id, users: userList(null), projects: projectList() })
@@ -501,6 +682,7 @@ wss.on('connection', (ws, req) => {
     if (msg.t === 'hello') {
       const name = String(msg.name ?? '').trim().slice(0, 30)
       if (name) info.name = name
+      if (isSafeId(msg.deviceId)) info.deviceId = msg.deviceId
       sendProjectList(ws)
       broadcastUsers()
       return
@@ -534,17 +716,35 @@ wss.on('connection', (ws, req) => {
     if (msg.t === 'project-save') {
       const project = normalizeProject(msg.project)
       if (!project) return
+      const existing = projects.get(project.id)
+      const deviceId = isSafeId(msg.deviceId) ? msg.deviceId : info.deviceId || info.id
+      project.creatorId = existing?.creatorId || deviceId
       projects.set(project.id, project)
       void persistProjects()
       void requestMissingProjectAssets(ws, project)
       sendTo(ws, { t: 'project-saved', projectId: project.id, updatedAt: project.updatedAt })
       broadcastProjectList()
+      scheduleMaintenance()
       return
     }
 
     if (msg.t === 'project-delete') {
       const projectId = String(msg.projectId ?? '')
-      if (!isSafeId(projectId) || !projects.delete(projectId)) return
+      if (!isSafeId(projectId)) return
+      const project = projects.get(projectId)
+      if (!project) return
+      const requester = isSafeId(msg.deviceId) ? msg.deviceId : info.deviceId || info.id
+      // 旧项目无 creatorId 时允许任意删除（首次保存后才会盖章）
+      if (project.creatorId && project.creatorId !== requester) {
+        sendTo(ws, { t: 'project-delete-denied', projectId })
+        return
+      }
+      // 备份项目数据，保留 24 小时后由维护任务清理
+      const backupFile = join(BACKUP_PROJECTS_DIR, `${projectId}_${Date.now()}.json`)
+      writeFile(backupFile, JSON.stringify(project, null, 2), 'utf8').catch((error) => {
+        console.warn('[SuQCanvas LAN] Failed to write project backup:', error)
+      })
+      projects.delete(projectId)
       void persistProjects()
       for (const client of clients.values()) {
         if (client.projectId === projectId) client.projectId = null
@@ -552,6 +752,7 @@ wss.on('connection', (ws, req) => {
       broadcast({ t: 'project-deleted', projectId })
       broadcastProjectList()
       broadcastUsers()
+      scheduleMaintenance()
       return
     }
 
@@ -559,6 +760,66 @@ wss.on('connection', (ws, req) => {
       const projectId = String(msg.projectId ?? '')
       const project = projects.get(projectId)
       if (project) sendTo(ws, { t: 'project-data', project, from: 'server' })
+      return
+    }
+
+    if (msg.t === 'backup-list-request') {
+      void listProjectBackups().then((backups) => {
+        sendTo(ws, { t: 'backup-list', backups })
+      })
+      return
+    }
+
+    if (msg.t === 'backup-restore') {
+      const projectId = String(msg.projectId ?? '')
+      const deletedAt = Number(msg.deletedAt)
+      if (!isSafeId(projectId) || !Number.isInteger(deletedAt) || deletedAt <= 0) return
+      const respond = (ok, error) =>
+        sendTo(ws, { t: 'backup-restore-result', projectId, deletedAt, ok, ...(error ? { error } : {}) })
+      if (projects.has(projectId)) {
+        respond(false, 'exists')
+        return
+      }
+      const requester = isSafeId(msg.deviceId) ? msg.deviceId : info.deviceId || info.id
+      const backupFile = join(BACKUP_PROJECTS_DIR, `${projectId}_${deletedAt}.json`)
+      void (async () => {
+        let backup
+        try {
+          backup = JSON.parse(await readFile(backupFile, 'utf8'))
+        } catch {
+          respond(false, 'expired')
+          return
+        }
+        if (!isProject(backup) || backup.id !== projectId) {
+          respond(false, 'expired')
+          return
+        }
+        if (Date.now() - deletedAt > RETENTION_MS) {
+          await rm(backupFile, { force: true })
+          respond(false, 'expired')
+          return
+        }
+        if (backup.creatorId && backup.creatorId !== requester) {
+          respond(false, 'denied')
+          return
+        }
+        if (projects.has(projectId)) {
+          respond(false, 'exists')
+          return
+        }
+        const project = normalizeProject(backup)
+        if (!project) {
+          respond(false, 'expired')
+          return
+        }
+        project.creatorId = backup.creatorId || requester
+        projects.set(projectId, project)
+        void persistProjects()
+        await rm(backupFile, { force: true })
+        broadcastProjectList()
+        scheduleMaintenance()
+        respond(true)
+      })()
       return
     }
 

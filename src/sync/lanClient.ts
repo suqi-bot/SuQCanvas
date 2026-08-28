@@ -5,6 +5,7 @@ import { toast } from '../store/uiStore'
 import type { AssetMeta, SuqEdge, SuqNode } from '../types'
 import type { Viewport } from '@xyflow/react'
 import { getLanUserColor } from './lanColors'
+import { getDeviceId } from '../utils/deviceId'
 
 // 分片大小取 3 的倍数，使每个分片的 base64 都对齐到字节边界，
 // 各分片无填充 base64 拼接后才能精确还原原始数据
@@ -182,6 +183,20 @@ const MAX_THUMB_BYTES = 2_000_000
 /** projectId -> 项目数据等待者 */
 const projectDataWaiters = new Map<string, Array<(rec: ProjectRecord | null) => void>>()
 
+export interface LanBackupMeta {
+  projectId: string
+  name: string
+  deletedAt: number
+  creatorId?: string
+  nodeCount: number
+}
+
+const backupListWaiters: Array<(backups: LanBackupMeta[]) => void> = []
+const backupRestoreWaiters = new Map<
+  string,
+  Array<(result: { ok: boolean; error?: string }) => void>
+>()
+
 export function isLanConnected(): boolean {
   return ws?.readyState === WebSocket.OPEN
 }
@@ -198,13 +213,26 @@ function roomSend(t: string, payload: Record<string, unknown>): void {
 
 function parseProjectList(
   value: unknown,
-): Array<{ id: string; name: string; updatedAt: number }> {
-  return ((value as Array<{ id?: string; name?: string; updatedAt?: number }>) ?? [])
+): Array<{ id: string; name: string; updatedAt: number; creatorId?: string }> {
+  return ((value as Array<{ id?: string; name?: string; updatedAt?: number; creatorId?: string }>) ?? [])
     .filter((project) => project?.id)
     .map((project) => ({
       id: String(project.id),
       name: String(project.name ?? '未命名项目'),
       updatedAt: Number(project.updatedAt) || 0,
+      ...(project.creatorId ? { creatorId: String(project.creatorId) } : {}),
+    }))
+}
+
+function parseBackupList(value: unknown): LanBackupMeta[] {
+  return ((value as Array<Record<string, unknown>>) ?? [])
+    .filter((b) => typeof b?.projectId === 'string')
+    .map((b) => ({
+      projectId: String(b.projectId),
+      name: String(b.name ?? '未命名项目'),
+      deletedAt: Number(b.deletedAt) || 0,
+      ...(b.creatorId ? { creatorId: String(b.creatorId) } : {}),
+      nodeCount: Number(b.nodeCount) || 0,
     }))
 }
 
@@ -271,7 +299,7 @@ export function lanConnect(url: string, name: string, opts: { isReconnect?: bool
       // 忽略存储失败
     }
     useLanStore.setState({ status: 'connected', followId: null, remoteViewport: null })
-    send({ t: 'hello', name })
+    send({ t: 'hello', name, deviceId: getDeviceId() })
     const activeProjectId = useLanStore.getState().activeProjectId
     if (activeProjectId) {
       send({ t: 'join-project', projectId: activeProjectId })
@@ -471,6 +499,28 @@ function handleMessage(msg: LanMessage): void {
         lan.setActiveProjectId(null)
         lan.clearCollaborationState()
         toast('当前协作项目已从局域网主机删除', 'error')
+      }
+      break
+    }
+    case 'project-delete-denied': {
+      toast('只有项目创建者（主机）可以删除项目', 'error')
+      break
+    }
+    case 'backup-list': {
+      const waiters = backupListWaiters.splice(0)
+      const backups = parseBackupList(msg.backups)
+      for (const w of waiters) w(backups)
+      break
+    }
+    case 'backup-restore-result': {
+      const projectId = String(msg.projectId ?? '')
+      const deletedAt = Number(msg.deletedAt) || 0
+      const key = `${projectId}:${deletedAt}`
+      const waiters = backupRestoreWaiters.get(key)
+      if (waiters?.length) {
+        backupRestoreWaiters.delete(key)
+        const ok = msg.ok === true
+        for (const w of waiters) w({ ok, error: ok ? undefined : String(msg.error ?? 'unknown') })
       }
       break
     }
@@ -759,13 +809,13 @@ export function isNodeLockedByOther(nodeId: string): boolean {
 /** 将项目快照保存到运行中继服务的局域网主机。 */
 export function saveProjectToLan(project: ProjectRecord): boolean {
   if (!isLanConnected()) return false
-  send({ t: 'project-save', project })
+  send({ t: 'project-save', project, deviceId: getDeviceId() })
   return true
 }
 
 export function deleteProjectFromLan(projectId: string): boolean {
   if (!isLanConnected()) return false
-  send({ t: 'project-delete', projectId })
+  send({ t: 'project-delete', projectId, deviceId: getDeviceId() })
   if (useLanStore.getState().activeProjectId === projectId) leaveLanProject()
   return true
 }
@@ -789,6 +839,48 @@ export function fetchProjectFromLan(projectId: string): Promise<ProjectRecord | 
         pending.shift()
         if (pending.length === 0) projectDataWaiters.delete(projectId)
         resolve(null)
+      }
+    }, 8000)
+  })
+}
+
+export function fetchLanBackups(): Promise<LanBackupMeta[]> {
+  return new Promise((resolve) => {
+    if (!isLanConnected()) {
+      resolve([])
+      return
+    }
+    backupListWaiters.push((backups) => resolve(backups))
+    send({ t: 'backup-list-request' })
+    setTimeout(() => {
+      const idx = backupListWaiters.length - 1
+      if (idx >= 0) {
+        backupListWaiters.splice(idx, 1)
+        resolve([])
+      }
+    }, 8000)
+  })
+}
+
+export function restoreProjectFromLan(
+  projectId: string,
+  deletedAt: number,
+): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    if (!isLanConnected()) {
+      resolve({ ok: false, error: 'disconnected' })
+      return
+    }
+    const key = `${projectId}:${deletedAt}`
+    const list = backupRestoreWaiters.get(key) ?? []
+    list.push((result) => resolve(result))
+    backupRestoreWaiters.set(key, list)
+    send({ t: 'backup-restore', projectId, deletedAt, deviceId: getDeviceId() })
+    setTimeout(() => {
+      const pending = backupRestoreWaiters.get(key)
+      if (pending?.length) {
+        backupRestoreWaiters.delete(key)
+        resolve({ ok: false, error: 'timeout' })
       }
     }, 8000)
   })

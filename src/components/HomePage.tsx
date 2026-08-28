@@ -16,13 +16,17 @@ import { useLanStore } from '../store/lanStore'
 import {
   broadcastLocalProjects,
   deleteProjectFromLan,
+  fetchLanBackups,
   fetchProjectFromLan,
   lanDisconnect,
   leaveLanProject,
+  restoreProjectFromLan,
+  type LanBackupMeta,
 } from '../sync/lanClient'
 import { STICKY_COLORS, type StickyColor, type SuqEdge, type SuqNode } from '../types'
 import type { Theme } from '../store/settingsStore'
 import { LanIcon, MoonIcon, PlusIcon, SunIcon } from '../canvas/nodes/Icons'
+import { getDeviceId } from '../utils/deviceId'
 import { APP_VERSION } from '../appVersion'
 
 function fmtTime(ts: number): string {
@@ -429,6 +433,7 @@ export function HomePage() {
   const importRef = useRef<HTMLInputElement | null>(null)
   const remoteProjects = useLanStore((s) => s.remoteProjects)
   const lanName = useLanStore((s) => s.name)
+  const [backups, setBackups] = useState<LanBackupMeta[] | null>(null)
 
   const refresh = useCallback(async () => {
     setProjects(await syncProjectList())
@@ -511,7 +516,14 @@ export function HomePage() {
   }
 
   const handleDelete = async (p: ProjectRecord) => {
-    if (!window.confirm(`确定删除项目「${p.name}」吗？其中的媒体文件也会被清理。`)) return
+    if (isSharedId(p.id)) {
+      const meta = remoteProjects.find((r) => r.id === p.id)
+      if (meta?.creatorId && meta.creatorId !== getDeviceId()) {
+        toast('只有项目创建者（主机）可以删除项目', 'error')
+        return
+      }
+    }
+    if (!window.confirm(`确定删除项目「${p.name}」吗？删除后服务器将保留备份 24 小时。`)) return
     setBusy(true)
     try {
       const authed = useAuthStore.getState().user !== null
@@ -546,6 +558,38 @@ export function HomePage() {
       setBusy(false)
     }
     void broadcastLocalProjects()
+  }
+
+  const handleRestore = async (b: LanBackupMeta) => {
+    if (busy) return
+    if (b.creatorId && b.creatorId !== getDeviceId()) {
+      toast('只有项目创建者可以恢复该项目', 'error')
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await restoreProjectFromLan(b.projectId, b.deletedAt)
+      if (!result.ok) {
+        const messages: Record<string, string> = {
+          exists: '已存在同名项目，无法恢复',
+          denied: '只有项目创建者可以恢复该项目',
+          expired: '备份已过期或已被清理',
+          timeout: '请求超时，请重试',
+          disconnected: '局域网未连接',
+        }
+        toast(messages[result.error ?? ''] ?? '恢复失败，请重试', 'error')
+        if (result.error !== 'denied') setBackups(await fetchLanBackups())
+        return
+      }
+      toast(`已恢复项目「${b.name}」`, 'success')
+      void fetchProjectFromLan(b.projectId)
+      setBackups((prev) =>
+        prev?.filter((x) => !(x.projectId === b.projectId && x.deletedAt === b.deletedAt)) ?? prev,
+      )
+      await refresh()
+    } finally {
+      setBusy(false)
+    }
   }
 
   const handleExport = async (p: ProjectRecord) => {
@@ -669,6 +713,26 @@ export function HomePage() {
           >
             导入 .sqcanvas
           </button>
+          {!IS_ONLINE_BUILD && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (backups !== null) {
+                  setBackups(null)
+                } else {
+                  setBackups(await fetchLanBackups())
+                }
+              }}
+              disabled={busy}
+              className={`rounded-md border px-3 py-1.5 text-xs hover:bg-hover disabled:cursor-wait disabled:opacity-50 ${
+                backups !== null
+                  ? 'border-sky-500/50 text-sky-500'
+                  : 'border-edge2 text-soft'
+              }`}
+            >
+              恢复已删除
+            </button>
+          )}
           <button
             type="button"
             onClick={toggleTheme}
@@ -695,6 +759,54 @@ export function HomePage() {
             </div>
           </button>
         </div>
+
+        {backups !== null && (
+          <div className="mb-6 rounded-2xl border border-edge bg-panel p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-medium text-dim">
+                可恢复的项目（{backups.length}）· 备份保留 24 小时
+              </span>
+              <button
+                type="button"
+                onClick={() => setBackups(null)}
+                className="rounded px-2 py-0.5 text-xs text-mid hover:bg-hover hover:text-main"
+              >
+                收起
+              </button>
+            </div>
+            {backups.length === 0 ? (
+              <div className="py-6 text-center text-sm text-dim">没有可恢复的已删除项目</div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {backups.map((b) => {
+                  const canRestore = !b.creatorId || b.creatorId === getDeviceId()
+                  return (
+                    <div
+                      key={`${b.projectId}:${b.deletedAt}`}
+                      className="flex items-center gap-3 rounded-xl border border-edge px-4 py-2.5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm text-soft">{b.name}</div>
+                        <div className="mt-0.5 text-[11px] text-dim">
+                          {b.nodeCount} 个元素 · 删除于 {fmtTime(b.deletedAt)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleRestore(b)}
+                        disabled={busy || !canRestore}
+                        title={canRestore ? '恢复该项目' : '仅创建者可恢复'}
+                        className="shrink-0 rounded-md border border-sky-500/40 px-3 py-1 text-xs text-sky-500 hover:bg-sky-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        恢复
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="mb-3 text-xs font-medium uppercase tracking-wider text-dim">
           全部项目（{visibleProjects.length}）
@@ -783,10 +895,21 @@ export function HomePage() {
                       </button>
                       <button
                         type="button"
-                        title="删除"
+                        title={
+                          isSharedId(p.id) &&
+                          remoteProjects.find((r) => r.id === p.id)?.creatorId &&
+                          remoteProjects.find((r) => r.id === p.id)?.creatorId !== getDeviceId()
+                            ? '仅创建者可删除'
+                            : '删除'
+                        }
                         onClick={() => void handleDelete(p)}
-                        disabled={busy}
-                        className="rounded px-1.5 py-1 text-xs text-rose-500 hover:bg-hover disabled:cursor-wait"
+                        disabled={
+                          busy ||
+                          (isSharedId(p.id) &&
+                            !!remoteProjects.find((r) => r.id === p.id)?.creatorId &&
+                            remoteProjects.find((r) => r.id === p.id)?.creatorId !== getDeviceId())
+                        }
+                        className="rounded px-1.5 py-1 text-xs text-rose-500 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         删除
                       </button>

@@ -16,6 +16,7 @@ export interface LanProjectMeta {
   name: string
   updatedAt: number
   ownerId: string
+  creatorId?: string
 }
 
 export interface LanCursor {
@@ -72,7 +73,7 @@ interface LanState {
   setRemoteViewport: (vp: Viewport) => void
   clearRemoteViewport: () => void
   setActiveProjectId: (id: string | null) => void
-  setSharedProjects: (projects: Array<{ id: string; name: string; updatedAt: number }>) => void
+  setSharedProjects: (projects: Array<{ id: string; name: string; updatedAt: number; creatorId?: string }>) => void
   setCursor: (cursor: LanCursor) => void
   removeCursor: (userId: string) => void
   setEditing: (editing: LanEditing) => void

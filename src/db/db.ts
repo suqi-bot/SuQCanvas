@@ -10,6 +10,7 @@ export interface AssetRecord {
   kind: MediaKind
   blob: Blob
   thumbnail?: Blob
+  orphanedAt?: number
 }
 
 export interface ProjectRecord {
@@ -42,6 +43,8 @@ export async function requestPersistentStorage(): Promise<boolean> {
   return false
 }
 
+const GC_RETENTION_MS = 24 * 60 * 60 * 1000
+
 export async function gcAssets(): Promise<void> {
   const projects = await db.projects.toArray()
   const referenced = new Set<string>()
@@ -51,8 +54,15 @@ export async function gcAssets(): Promise<void> {
       if (n.data?.coverAssetId) referenced.add(n.data.coverAssetId)
     }
   }
+  const now = Date.now()
   const assets = await db.assets.toArray()
   for (const a of assets) {
-    if (!referenced.has(a.id)) await db.assets.delete(a.id)
+    if (referenced.has(a.id)) {
+      if (a.orphanedAt) await db.assets.update(a.id, { orphanedAt: undefined })
+    } else if (a.orphanedAt && now - a.orphanedAt > GC_RETENTION_MS) {
+      await db.assets.delete(a.id)
+    } else if (!a.orphanedAt) {
+      await db.assets.update(a.id, { orphanedAt: now })
+    }
   }
 }
