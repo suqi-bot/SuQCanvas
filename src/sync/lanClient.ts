@@ -168,6 +168,16 @@ const assetIdleTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const sendingTargets = new Set<string>()
 /** assetId -> 服务器可提供的 HTTP 流式拉流地址（仅视频），命中后播放器直接用，不再整份下载 */
 const httpAssetUrls = new Map<string, string>()
+/**
+ * assetId -> 局域网同步来的封面字节。
+ * 封面随资产一起传输（上传端已抓好帧），观看端直接显示，不必再对视频解码抓帧；
+ * 先存内存是因为封面可能早于 asset-meta 到达，此时还没有记录可落库。
+ */
+const lanThumbs = new Map<string, Blob>()
+/** 本次会话已向中继补推过封面的资产 */
+const thumbPushed = new Set<string>()
+/** 单条封面的字节上限（jpeg 通常几十 KB，超限视为异常数据丢弃） */
+const MAX_THUMB_BYTES = 2_000_000
 
 /** projectId -> 项目数据等待者 */
 const projectDataWaiters = new Map<string, Array<(rec: ProjectRecord | null) => void>>()
@@ -572,6 +582,9 @@ function handleMessage(msg: LanMessage): void {
     case 'asset-chunk':
       receiveAssetChunk(msg)
       break
+    case 'asset-thumb':
+      receiveAssetThumb(msg)
+      break
     case 'asset-request':
       void respondAssetRequest(msg)
       break
@@ -861,11 +874,75 @@ export function getLanAssetHttpUrl(assetId: string): string | undefined {
   return httpAssetUrls.get(assetId)
 }
 
-/** 本地新增素材时向局域网广播（大文件分片 base64） */
-export async function pushAssetToLan(meta: AssetMeta, blob: Blob): Promise<void> {
+/** 局域网同步来的封面字节（上传端抓帧生成，观看端直接显示） */
+export function getLanAssetThumbnail(assetId: string): Blob | undefined {
+  return lanThumbs.get(assetId)
+}
+
+/** 随资产一起发送封面：target 与资产保持一致（视频只交服务器缓存，其余广播给房间内设备） */
+async function sendThumbnailToLan(assetId: string, thumbnail: Blob | undefined, target?: string): Promise<void> {
+  if (!(thumbnail instanceof Blob) || !thumbnail.size || thumbnail.size > MAX_THUMB_BYTES) return
+  try {
+    const buf = new Uint8Array(await thumbnail.arrayBuffer())
+    send({
+      t: 'asset-thumb',
+      assetId,
+      mime: thumbnail.type || 'image/jpeg',
+      data: bufToB64(buf),
+      ...(target ? { to: target } : {}),
+    })
+  } catch {
+    // 封面读取失败不影响资产本身
+  }
+}
+
+function receiveAssetThumb(msg: LanMessage): void {
+  const assetId = String(msg.assetId ?? '')
+  const data = typeof msg.data === 'string' ? msg.data : ''
+  if (!assetId || !data) return
+  if (msg.from === useLanStore.getState().selfId) return
+  let blob: Blob
+  try {
+    blob = new Blob([b64ToUint8(data)], { type: String(msg.mime || 'image/jpeg') })
+  } catch {
+    return
+  }
+  if (!blob.size || blob.size > MAX_THUMB_BYTES) return
+  lanThumbs.set(assetId, blob)
+  // 记录已存在时顺手落库（partial update，避免把整份视频重写一遍）
+  void db.assets
+    .update(assetId, { thumbnail: blob })
+    .catch(() => undefined)
+}
+
+/**
+ * 把本地封面补推给中继（会话内每个资产只推一次）。
+ * 封面随资产同步是后加的能力：在此之前缓存到中继的视频没有 .thumb 文件，而中继一旦有
+ * .bin 就直接回 asset-http、不会再向对端要封面，旧库因此永远缺封面。让任何本地已有封面
+ * 的设备（通常就是上传端）在渲染到时补推一次，旧库无需重新导入即可自愈。
+ */
+export function pushThumbnailToServer(assetId: string, thumbnail: Blob): void {
+  if (!isLanConnected()) return
+  if (thumbPushed.has(assetId)) return
+  thumbPushed.add(assetId)
+  void sendThumbnailToLan(assetId, thumbnail, 'server')
+}
+
+/** 本地新增素材时向局域网分发（大文件分片 base64） */
+export async function pushAssetToLan(
+  meta: AssetMeta,
+  blob: Blob,
+  thumbnail?: Blob,
+): Promise<void> {
   if (!isLanConnected()) return
   const total = Math.max(1, Math.ceil(blob.size / CHUNK_SIZE))
-  send({ t: 'asset-meta', asset: meta, totalChunks: total })
+  // 视频只上传给中继服务器缓存（to: 'server'），不再向房间内所有设备广播整份文件：
+  // 广播会让每次导入在局域网内产生 N 份完整拷贝，批量导入大视频即可打满网络；
+  // 其他设备播放时由服务器经 HTTP Range 流式拉取（边下边播）。
+  const target = (meta.mime ?? '').startsWith('video/') ? 'server' : undefined
+  // 封面先于整份文件发出：体积小、到达快，其他设备的节点不必等视频传完就有图
+  await sendThumbnailToLan(meta.id, thumbnail, target)
+  send({ t: 'asset-meta', asset: meta, totalChunks: total, ...(target ? { to: target } : {}) })
   for (let i = 0; i < total; i++) {
     const slice = blob.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
     const buf = new Uint8Array(await slice.arrayBuffer())
@@ -875,6 +952,7 @@ export async function pushAssetToLan(meta: AssetMeta, blob: Blob): Promise<void>
       index: i,
       total,
       data: bufToB64(buf),
+      ...(target ? { to: target } : {}),
     })
     // 每 8 块让出一次主线程，避免大视频长时间阻塞浏览器
     if ((i & 7) === 7) await new Promise((r) => setTimeout(r, 0))
@@ -882,7 +960,10 @@ export async function pushAssetToLan(meta: AssetMeta, blob: Blob): Promise<void>
 }
 
 /** 从局域网请求素材，成功（写入本地 db）返回 true */
-export function requestAssetFromLan(assetId: string): Promise<boolean> {
+export function requestAssetFromLan(
+  assetId: string,
+  opts: { forceBlob?: boolean } = {},
+): Promise<boolean> {
   return new Promise((resolve) => {
     if (!isLanConnected()) {
       resolve(false)
@@ -896,7 +977,21 @@ export function requestAssetFromLan(assetId: string): Promise<boolean> {
     if (!assetRequestsInFlight.has(assetId)) {
       assetRequestsInFlight.add(assetId)
       scheduleAssetIdleTimeout(assetId)
-      send({ t: 'asset-request', assetId })
+      send({ t: 'asset-request', assetId, ...(opts.forceBlob ? { forceBlob: true } : {}) })
+      // 视频等大文件可能正由对端整份上传到服务器缓存，缓存就绪前请求会被忽略：
+      // 周期性重发请求，服务器缓存一旦就绪立即回 asset-http（HTTP Range 流式拉取），
+      // 不必干等空闲超时；服务器侧对同一素材 60s 内只广播一次，不会引发对端重复上传。
+      const retryTimer = setInterval(() => {
+        if (!assetWaiters.has(assetId) || !isLanConnected()) {
+          clearInterval(retryTimer)
+          return
+        }
+        send({
+          t: 'asset-request',
+          assetId,
+          ...(opts.forceBlob ? { forceBlob: true } : {}),
+        })
+      }, 3000)
     }
   })
 }
@@ -904,9 +999,10 @@ export function requestAssetFromLan(assetId: string): Promise<boolean> {
 function receiveAssetMeta(msg: LanMessage): void {
   const asset = msg.asset as AssetMeta
   if (!asset?.id) return
-  // 该资产已可走 HTTP 流式拉流（视频），不再收集 WebSocket 分片；
-  // 但仍落一条元数据记录（不含 blob），供封面生成识别视频类型
-  if (httpAssetUrls.has(asset.id)) {
+  // 该资产已可走 HTTP 流式拉取（视频），不再收集 WebSocket 分片；
+  // 但仍落一条元数据记录（不含 blob)，供封面生成识别视频类型。
+  // 例外：forceBlob（封面抓帧失败的兜底整份拉取）必须继续收集分片。
+  if (httpAssetUrls.has(asset.id) && msg.forceBlob !== true) {
     void db.assets.get(asset.id).then((rec) => {
       const hasBlob = !!rec?.blob && rec.blob.size > 0
       if (hasBlob || rec?.thumbnail) return
@@ -917,6 +1013,7 @@ function receiveAssetMeta(msg: LanMessage): void {
           mime: asset.mime ?? 'video/mp4',
           size: asset.size ?? 0,
           kind: asset.kind ?? 'video',
+          thumbnail: lanThumbs.get(asset.id),
         } as AssetRecord)
         .catch(() => {
           // 落库失败不影响流式拉流
@@ -965,13 +1062,18 @@ function receiveAssetChunk(msg: LanMessage): void {
         type: pending.meta.mime || 'application/octet-stream',
       })
       void db.assets
-        .put({
-          id: pending.meta.id,
-          name: pending.meta.name ?? '资源',
-          mime: pending.meta.mime ?? 'application/octet-stream',
-          size: blob.size,
-          kind: pending.meta.kind ?? 'file',
-          blob,
+        .get(assetId)
+        .then((previous) => {
+          const thumbnail = lanThumbs.get(assetId) ?? previous?.thumbnail
+          return db.assets.put({
+            id: pending.meta.id,
+            name: pending.meta.name ?? '资源',
+            mime: pending.meta.mime ?? 'application/octet-stream',
+            size: blob.size,
+            kind: pending.meta.kind ?? 'file',
+            blob,
+            ...(thumbnail ? { thumbnail } : {}),
+          })
         })
         .then(() => {
           const waiters = assetWaiters.get(assetId)
@@ -1008,7 +1110,11 @@ async function respondAssetRequest(msg: LanMessage): Promise<void> {
         kind: record.kind,
       },
       totalChunks: Math.max(1, Math.ceil(record.blob.size / CHUNK_SIZE)),
+      // 接收方明确要整份素材时透传标记，使其跳过 asset-http 的元数据分支，继续收集分片
+      forceBlob: Boolean(msg.forceBlob),
     })
+    // 封面先发给请求方：整份文件可能还要传几十秒，封面几 KB 立刻可用
+    await sendThumbnailToLan(assetId, record.thumbnail, from)
     const total = Math.max(1, Math.ceil(record.blob.size / CHUNK_SIZE))
     for (let i = 0; i < total; i++) {
       const slice = record.blob.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)

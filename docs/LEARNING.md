@@ -336,11 +336,14 @@ npm run lan
 ### 3. 功能
 
 - **画布实时同步**：节点/连线/文字/位置自动广播（150ms 节流），新设备加入自动收到当前画布
-- **素材互传**：图片/视频/PDF 等以 256KB 分片广播；新设备缺失素材时按需向在线的设备请求
+- **素材互传**：图片/PDF 等以 256KB 分片广播；视频只上传给中继服务器缓存，其他设备经 HTTP Range
+  流式拉取（边下边播），不在局域网内产生多份完整拷贝
+- **封面随资产同步**：上传端抓好的封面（几 KB jpeg，`asset-thumb`）随资产一起发给中继/对端，
+  其他设备直接显示，不必自己再解码视频抓帧（HEVC、跨源、反代等场景抓帧会失败）
 - **在线用户列表**：显示昵称与 IP，可一键「跟随」某用户视角（平移/缩放实时跟随）
 - **与云端并存**：局域网模式与 Supabase/OSS 云同步互不干扰；素材加载优先级 本地缓存 → OSS → 局域网
 
 ### 4. 协议
 
-文本 JSON 消息：`hello` / `welcome` / `users` / `leave` / `peer-joined` / `sync`（nodes+edges 全量）/ `viewport` / `asset-meta` / `asset-chunk`（base64 分片，支持 `to` 定向）/ `asset-request`。二进制统一 base64 封装，中继只转发不解析。
+文本 JSON 消息：`hello` / `welcome` / `users` / `leave` / `peer-joined` / `sync`（nodes+edges 全量）/ `viewport` / `asset-meta` / `asset-chunk` / `asset-thumb`（base64，支持 `to` 定向或 `to: server` 只交中继缓存）/ `asset-request` / `asset-http`（中继告知视频可用的 HTTP 流式地址）。二进制统一 base64 封装，中继对资产分片与封面顺带落盘缓存。
 

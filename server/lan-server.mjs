@@ -100,7 +100,11 @@ function assetKey(id) {
 
 function assetPaths(id) {
   const key = assetKey(id)
-  return { meta: join(ASSETS_DIR, `${key}.json`), data: join(ASSETS_DIR, `${key}.bin`) }
+  return {
+    meta: join(ASSETS_DIR, `${key}.json`),
+    data: join(ASSETS_DIR, `${key}.bin`),
+    thumb: join(ASSETS_DIR, `${key}.thumb`),
+  }
 }
 
 // ---- 资产 HTTP 流式拉取（支持 Range，视频边下边播） ----
@@ -164,6 +168,9 @@ async function serveAsset(req, res, assetId) {
     'Content-Type': contentType,
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'public, max-age=86400',
+    // 网页（Vite 开发站 5173 / IDC 反代域名）可能与中继 8790 不同源，
+    // 封面抓帧需要用 crossOrigin=anonymous 的视频元素跨源读取画面，必须返回 CORS 头
+    'Access-Control-Allow-Origin': '*',
   }
   if (range) {
     const { start, end } = range
@@ -267,6 +274,8 @@ const clients = new Map()
 /** @type {Map<string, { meta: any, total: number, handle: import('node:fs/promises').FileHandle | null, tmpPath: string | null, received: number, seen: Set<number>, writeChain: Promise<void> | undefined }>} */
 const pendingAssets = new Map()
 const requestedAssets = new Set()
+// 封面是几十 KB 量级的 jpeg，超过该上限视为异常数据直接丢弃
+const MAX_THUMB_BASE64 = 4_000_000
 
 function isOpen(ws) {
   return ws.readyState === WebSocket.OPEN
@@ -362,6 +371,44 @@ async function cacheAssetChunk(info, msg) {
   }).catch(() => undefined)
 }
 
+/** 缓存客户端随资产上传的封面字节：先写临时文件再 rename，避免并发上传读到半截文件 */
+async function cacheAssetThumb(info, msg) {
+  const assetId = String(msg.assetId ?? '')
+  if (!isSafeId(assetId)) return
+  const data = String(msg.data ?? '')
+  if (!data || data.length > MAX_THUMB_BASE64) return
+  const buffer = Buffer.from(data, 'base64')
+  if (!buffer.length) return
+  const paths = assetPaths(assetId)
+  // 多台设备会为同一历史视频重复补推，已有缓存直接跳过
+  if (await access(paths.thumb).then(() => true, () => false)) return
+  const tmpPath = `${paths.thumb}.tmp-${info.id}`
+  try {
+    await writeFile(tmpPath, buffer)
+    await rename(tmpPath, paths.thumb)
+  } catch (error) {
+    await rm(tmpPath, { force: true }).catch(() => undefined)
+    console.warn('[SuQCanvas LAN] Failed to cache thumbnail:', error)
+  }
+}
+
+/** 已缓存封面随 asset-request 一并下发，观看端无需再对视频解码抓帧 */
+async function sendCachedThumb(ws, assetId) {
+  let buffer
+  try {
+    buffer = await readFile(assetPaths(assetId).thumb)
+  } catch {
+    return
+  }
+  if (!buffer.length || buffer.length * 4 / 3 > MAX_THUMB_BASE64) return
+  sendTo(ws, {
+    t: 'asset-thumb',
+    assetId,
+    data: buffer.toString('base64').replace(/=+$/, ''),
+    from: 'server',
+  })
+}
+
 async function requestMissingProjectAssets(ws, project) {
   const ids = new Set(
     project.graph.nodes
@@ -382,7 +429,7 @@ async function requestMissingProjectAssets(ws, project) {
   }
 }
 
-async function sendCachedAsset(ws, assetId) {
+async function sendCachedAsset(ws, assetId, forceBlob = false) {
   if (!isSafeId(assetId)) return false
   let handle
   try {
@@ -392,11 +439,20 @@ async function sendCachedAsset(ws, assetId) {
       stat(paths.data),
     ])
     const total = Math.max(1, Math.ceil(fileStat.size / CHUNK_SIZE))
-    // 视频类资产通知请求方可直接走 HTTP Range 流式拉取（无需整份 WebSocket 下载）
-    if (String(meta.mime ?? '').startsWith('video/')) {
+    // 视频类资产默认只回 HTTP Range 流式拉流地址与元数据，不再整份经 WebSocket 下发：
+    // 客户端收到 asset-http 后即转用 HTTP 边下边播并丢弃后续分片，若继续发送全部分片，
+    // 每台设备每次请求/时长探测/封面抓帧都会产生一份完整的无效视频流，
+    // 多台设备同时打开播放器即可瞬间打满局域网。
+    // 仅当调用方显式要求整份素材（forceBlob，封面抓帧失败的兜底）时才分片下发。
+    if (!forceBlob && String(meta.mime ?? '').startsWith('video/')) {
       sendTo(ws, { t: 'asset-http', assetId, url: `${WEB_BASE}assets/${assetId}`, from: 'server' })
+      sendTo(ws, { t: 'asset-meta', asset: meta, totalChunks: total, from: 'server' })
+      await sendCachedThumb(ws, assetId)
+      return true
     }
-    sendTo(ws, { t: 'asset-meta', asset: meta, totalChunks: total, from: 'server' })
+    sendTo(ws, { t: 'asset-meta', asset: meta, totalChunks: total, from: 'server', forceBlob })
+    // 封面先于分片下发：观看端节点在文件还在传输时就能显示封面
+    await sendCachedThumb(ws, assetId)
     // 分块流式读取发送，不再把整个文件读进内存，避免多客户端并发时内存翻倍
     handle = await open(paths.data, 'r')
     const buf = Buffer.allocUnsafe(CHUNK_SIZE)
@@ -536,8 +592,14 @@ wss.on('connection', (ws, req) => {
 
     if (msg.t === 'asset-request') {
       const assetId = String(msg.assetId ?? '')
-      void sendCachedAsset(ws, assetId).then((found) => {
-        if (!found) broadcast({ ...msg, from: info.id }, ws, info.projectId)
+      void sendCachedAsset(ws, assetId, Boolean(msg.forceBlob)).then((found) => {
+        if (found) return
+        // 同一素材 60s 内只向房间广播一次请求：对端上传大文件（视频）期间，
+        // 请求方的周期重发不再触发多台持有方并发整份上传，避免局域网被重复流量打满
+        if (requestedAssets.has(assetId)) return
+        requestedAssets.add(assetId)
+        setTimeout(() => requestedAssets.delete(assetId), 60000)
+        broadcast({ ...msg, from: info.id }, ws, info.projectId)
       })
       return
     }
@@ -550,11 +612,13 @@ wss.on('connection', (ws, req) => {
       msg.t === 'editing' ||
       msg.t === 'activity' ||
       msg.t === 'asset-meta' ||
-      msg.t === 'asset-chunk'
+      msg.t === 'asset-chunk' ||
+      msg.t === 'asset-thumb'
     ) {
       msg.from = info.id
       msg.color = info.color
       if (msg.t === 'asset-chunk') void cacheAssetChunk(info, msg)
+      if (msg.t === 'asset-thumb') void cacheAssetThumb(info, msg)
       const target = msg.to
         ? [...clients.entries()].find(([, client]) => client.id === msg.to && client.projectId === info.projectId)
         : null

@@ -1,13 +1,22 @@
 import { db, type AssetRecord } from '../db/db'
 import { downloadAssetFromOss, getOssThumb, isOssConfigured } from '../sync/ossClient'
 import { fetchCloudAssets } from '../sync/cloudSync'
-import { getLanAssetHttpUrl, requestAssetFromLan } from '../sync/lanClient'
+import {
+  getLanAssetHttpUrl,
+  getLanAssetThumbnail,
+  pushThumbnailToServer,
+  requestAssetFromLan,
+} from '../sync/lanClient'
 import type { MediaKind } from '../types'
 
 const urlCache = new Map<string, string>()
 const thumbCache = new Map<string, string>()
 /** 正在生成封面缩略图的资产，防止多个节点并发重复抓帧 */
 const thumbnailGenerating = new Set<string>()
+/** HTTP 抓帧失败后已做过 blob 兜底的资产（一次性，避免反复拉取大文件） */
+const blobFallbackAttempted = new Set<string>()
+/** 已向局域网发起过取源请求、尚未收到回包的资产（防止轮询重复堆积等待者） */
+const lanSourceRequested = new Set<string>()
 /** 封面抓帧并发上限：避免多个隐藏 video 同时 seek 同一台服务器，占满浏览器连接池阻塞视频播放 */
 const THUMB_MAX_CONCURRENT = 2
 let thumbActive = 0
@@ -121,6 +130,10 @@ function captureVideoThumbnailFromUrl(sourceUrl: string): Promise<Blob | undefin
     video.muted = true
     video.playsInline = true
     video.preload = 'metadata'
+    // 局域网 HTTP 流式地址与网页可能不同源（Vite 开发站/反代域名 vs 中继 8790）：
+    // 需显式跨源请求（配合服务器 Access-Control-Allow-Origin）才能画到 canvas 上，
+    // 否则 canvas 被污染，getImageData/toBlob 抛 SecurityError，封面永远生成失败。
+    video.crossOrigin = 'anonymous'
     video.src = sourceUrl
     let settled = false
     let captureAttempts = 0
@@ -295,9 +308,17 @@ function isImageMostlyBlack(blob: Blob): Promise<boolean> {
 export async function getThumbnailUrl(assetId: string): Promise<string | undefined> {
   const cached = thumbCache.get(assetId)
   if (cached) return cached
+  // 局域网同步来的封面优先：上传端已抓好帧，观看端不必再解码一次
+  const synced = getLanAssetThumbnail(assetId)
+  if (synced) {
+    const url = URL.createObjectURL(synced)
+    thumbCache.set(assetId, url)
+    return url
+  }
   let record = await db.assets.get(assetId)
   const hasBlob = () => !!record?.blob && record.blob.size > 0
-  if (!hasBlob()) {
+  // 记录存在但无 blob 说明是局域网 meta-only 记录（文件走 HTTP 流式拉取），不必再从 OSS 整份下载
+  if (!record) {
     await fetchBlobFromCloud(assetId)
     record = await db.assets.get(assetId)
   }
@@ -305,29 +326,51 @@ export async function getThumbnailUrl(assetId: string): Promise<string | undefin
     record?.kind === 'video' || (record?.mime ?? '').startsWith('video/') || !!getLanAssetHttpUrl(assetId)
   // 已有封面（含局域网 meta-only 记录此前生成过封面）
   if (record?.thumbnail) {
+    let thumb = record.thumbnail
     // 视频封面黑帧自检：旧版本抓帧可能产出黑图，检测到则重新抓帧替换
-    if (isVideo) {
-      const black = await isImageMostlyBlack(record.thumbnail)
-      if (black) {
-        const thumb = await ensureVideoThumbnail(record, assetId)
-        if (thumb) {
-          const url = URL.createObjectURL(thumb)
-          thumbCache.set(assetId, url)
-          return url
-        }
-      }
+    if (isVideo && (await isImageMostlyBlack(thumb))) {
+      const regenerated = await ensureVideoThumbnail(record, assetId)
+      if (regenerated) thumb = regenerated
     }
-    const url = URL.createObjectURL(record.thumbnail)
+    // 本地有封面就补推一份给中继：封面同步能力上线前缓存的视频在服务器上没有 .thumb
+    if (isVideo) pushThumbnailToServer(assetId, thumb)
+    const url = URL.createObjectURL(thumb)
     thumbCache.set(assetId, url)
     return url
+  }
+  // 视频但本地既无文件也无流式地址（刷新后 httpAssetUrls 已清空）：
+  // 主动请求一次，中继会回 asset-http（流式地址）+ asset-thumb（封面），否则这里永远取不到源
+  if (isVideo && !hasBlob() && !getLanAssetHttpUrl(assetId)) {
+    if (!lanSourceRequested.has(assetId)) {
+      lanSourceRequested.add(assetId)
+      void requestAssetFromLan(assetId).then(() => lanSourceRequested.delete(assetId))
+    }
+    return undefined
   }
   // 视频：本地有 blob（peer 传输）或走 HTTP 流式（服务器缓存）时，抓帧生成封面
   if (isVideo && (hasBlob() || getLanAssetHttpUrl(assetId))) {
     const thumb = await ensureVideoThumbnail(record, assetId)
     if (thumb) {
+      pushThumbnailToServer(assetId, thumb)
       const url = URL.createObjectURL(thumb)
       thumbCache.set(assetId, url)
       return url
+    }
+    // HTTP 抓帧兜底：跨源/代理/编码异常等情况可能失败，一次性拉取全量素材，
+    // 用同源 blob URL 再抓一次保证封面最终可生成（仅在无本地文件时触发，避免反复拉大文件）
+    if (!hasBlob() && !blobFallbackAttempted.has(assetId)) {
+      blobFallbackAttempted.add(assetId)
+      const ok = await requestAssetFromLan(assetId, { forceBlob: true })
+      const fresh = ok ? await db.assets.get(assetId) : null
+      if (fresh?.blob instanceof Blob && fresh.blob.size > 0) {
+        const thumb2 = await ensureVideoThumbnail(fresh, assetId)
+        if (thumb2) {
+          pushThumbnailToServer(assetId, thumb2)
+          const url = URL.createObjectURL(thumb2)
+          thumbCache.set(assetId, url)
+          return url
+        }
+      }
     }
   }
   return undefined

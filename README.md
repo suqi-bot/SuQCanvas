@@ -100,6 +100,14 @@ location /lan-ws {
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
 }
+
+# 视频封面抓帧/列表封面走局域网素材 HTTP 流式拉流，同样需要反代到中继，
+# 否则跨域读取素材跨域头缺失、封面无法生成（视频播放不受影响）
+location /SuQCanvas/assets/ {
+    proxy_pass http://127.0.0.1:8790;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
 ```
 
 重载 Nginx 后，应用会默认连接 `wss://当前域名/lan-ws`，无需开放公网 `8790` 端口。若构建时需要使用其他地址，可在 `.env.lan` 中设置 `VITE_LAN_WS_URL` 后重新执行 `npm run build:lan`。局域网直连时（HTTP 页面）应用会默认连接 `ws://当前主机:8790`。

@@ -105,7 +105,7 @@ export async function putAsset(file: File): Promise<AssetMeta> {
     hasThumbnail: !!thumbnail,
   }
   if (isLanConnected()) {
-    void pushAssetToLan(meta, file).catch(() => {
+    void pushAssetToLan(meta, file, thumbnail).catch(() => {
       toast(`「${file.name}」局域网分发失败`, 'error')
     })
   }
@@ -130,7 +130,7 @@ export async function updateAssetText(assetId: string, text: string): Promise<vo
     kind: record.kind,
     hasThumbnail: Boolean(record.thumbnail),
   }
-  if (isLanConnected()) void pushAssetToLan(meta, blob)
+  if (isLanConnected()) void pushAssetToLan(meta, blob, record.thumbnail)
   void syncAssetToCloud(meta, blob, record.thumbnail)
 }
 
