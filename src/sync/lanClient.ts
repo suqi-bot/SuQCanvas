@@ -1,4 +1,4 @@
-import { db, type ProjectRecord } from '../db/db'
+import { db, type AssetRecord, type ProjectRecord } from '../db/db'
 import { useCanvasStore } from '../store/canvasStore'
 import { useLanStore, type LanUser, type LanActivityKind } from '../store/lanStore'
 import { toast } from '../store/uiStore'
@@ -150,15 +150,24 @@ function scheduleReconnect(): void {
   }, delay)
 }
 
-/** assetId -> 分片收集 */
+/** 素材传输空闲超时：持续收到分片就续期，长时间无数据才判定失败（大视频不再被固定 8s 误杀） */
+const ASSET_IDLE_TIMEOUT_MS = 60_000
+
+/** assetId -> 分片收集（直接存解码后的字节分片，避免拼接整个 base64 造成双倍内存） */
 interface PendingAsset {
   meta: AssetMeta
   total: number
-  chunks: (string | null)[]
+  parts: (Uint8Array | null)[]
 }
 const pendingAssets = new Map<string, PendingAsset>()
-const assetWaiters = new Map<string, Array<() => void>>()
+const assetWaiters = new Map<string, Array<(ok: boolean) => void>>()
 const assetRequestsInFlight = new Set<string>()
+/** assetId -> 空闲超时定时器 */
+const assetIdleTimers = new Map<string, ReturnType<typeof setTimeout>>()
+/** `${assetId}:${from}` -> 发送中，防止同一接收方被重复响应产生多条传输流 */
+const sendingTargets = new Set<string>()
+/** assetId -> 服务器可提供的 HTTP 流式拉流地址（仅视频），命中后播放器直接用，不再整份下载 */
+const httpAssetUrls = new Map<string, string>()
 
 /** projectId -> 项目数据等待者 */
 const projectDataWaiters = new Map<string, Array<(rec: ProjectRecord | null) => void>>()
@@ -210,6 +219,7 @@ export function lanConnect(url: string, name: string, opts: { isReconnect?: bool
     ws.onerror = null
     ws.close()
     ws = null
+    clearAllAssetTransfers()
   }
   if (!opts.isReconnect) cancelReconnect()
   else reconnectInProgress = true
@@ -261,16 +271,20 @@ export function lanConnect(url: string, name: string, opts: { isReconnect?: bool
       void fetchProjectFromLan(activeProjectId)
     }
     toast(opts.isReconnect ? '已恢复局域网协作连接' : '已连接局域网协作', 'success')
-    // 加入后请求当前画布引用的素材
-    const nodes = useCanvasStore.getState().nodes
-    for (const n of nodes) {
-      if (n.data?.assetId) void requestAssetFromLan(n.data.assetId)
+    // 加入后请求当前画布引用的素材 + 重连续传未完成的素材（接收端跳过已收分片）
+    const nodeAssetIds = new Set<string>()
+    for (const n of useCanvasStore.getState().nodes) {
+      if (n.data?.assetId) nodeAssetIds.add(n.data.assetId)
     }
+    for (const assetId of pendingAssets.keys()) nodeAssetIds.add(assetId)
+    for (const assetId of nodeAssetIds) void requestAssetFromLan(assetId)
   }
 
   sock.onclose = () => {
     if (ws !== sock) return
     ws = null
+    // 保留已收分片，自动重连后可从断点续传
+    interruptAssetTransfers()
     useLanStore.setState({
       status: opened ? 'idle' : 'error',
       users: [],
@@ -319,6 +333,7 @@ export function lanDisconnect(): void {
   }
   const sock = ws
   ws = null
+  clearAllAssetTransfers()
   if (sock) {
     sock.onclose = null
     sock.onerror = null
@@ -541,6 +556,16 @@ function handleMessage(msg: LanMessage): void {
       if (msg.from === lan.selfId || msg.projectId !== lan.activeProjectId) return
       lan.addActivity({ id: String(msg.id ?? `${msg.from}-${Date.now()}`), userId: String(msg.from ?? ''), name: String(msg.name ?? '协作者'), color: getLanUserColor(String(msg.from ?? ''), msg.color), kind: (msg.kind as LanActivityKind) || 'change', message: String(msg.message ?? ''), nodeId: msg.nodeId ? String(msg.nodeId) : undefined, createdAt: Number(msg.createdAt) || Date.now() })
       break
+    case 'asset-http': {
+      // 服务器告知视频可走 HTTP Range 流式拉取：记录地址并停止 WebSocket 下载流
+      const assetId = String(msg.assetId ?? '')
+      const url = resolveHttpUrl(String(msg.url ?? ''))
+      if (assetId && url) {
+        httpAssetUrls.set(assetId, url)
+        failAssetTransfer(assetId)
+      }
+      break
+    }
     case 'asset-meta':
       receiveAssetMeta(msg)
       break
@@ -758,6 +783,84 @@ export function fetchProjectFromLan(projectId: string): Promise<ProjectRecord | 
 
 // ---------- 素材传输 ----------
 
+function clearAssetIdleTimeout(assetId: string): void {
+  const timer = assetIdleTimers.get(assetId)
+  if (timer) clearTimeout(timer)
+  assetIdleTimers.delete(assetId)
+}
+
+/** 启动/续期空闲超时：只要持续有分片到达，传输就永远不被判定失败 */
+function scheduleAssetIdleTimeout(assetId: string): void {
+  clearAssetIdleTimeout(assetId)
+  assetIdleTimers.set(
+    assetId,
+    setTimeout(() => failAssetTransfer(assetId), ASSET_IDLE_TIMEOUT_MS),
+  )
+}
+
+/** 判定一次素材传输失败：清理进行中的传输并唤醒所有等待者（返回 false） */
+function failAssetTransfer(assetId: string): void {
+  clearAssetIdleTimeout(assetId)
+  pendingAssets.delete(assetId)
+  assetRequestsInFlight.delete(assetId)
+  const waiters = assetWaiters.get(assetId)
+  if (waiters) {
+    assetWaiters.delete(assetId)
+    for (const w of waiters) w(false)
+  }
+}
+
+/** 断开/退出时清空全部素材传输状态 */
+function clearAllAssetTransfers(): void {
+  for (const timer of assetIdleTimers.values()) clearTimeout(timer)
+  assetIdleTimers.clear()
+  for (const waiters of assetWaiters.values()) {
+    for (const w of waiters) w(false)
+  }
+  assetWaiters.clear()
+  pendingAssets.clear()
+  assetRequestsInFlight.clear()
+  sendingTargets.clear()
+  httpAssetUrls.clear()
+}
+
+/**
+ * 连接断开：唤醒等待者告知传输中断，但保留已收分片与空闲超时。
+ * 空闲超时到点仍未恢复会自动清理；若在超时前自动重连，
+ * onopen 会重新发起请求，接收端跳过已收分片从断点续传。
+ */
+function interruptAssetTransfers(): void {
+  for (const waiters of assetWaiters.values()) {
+    for (const w of waiters) w(false)
+  }
+  assetWaiters.clear()
+  assetRequestsInFlight.clear()
+  sendingTargets.clear()
+  httpAssetUrls.clear()
+}
+
+/** 把服务器返回的相对拉流地址拼上当前连接所在 origin（支持直连端口与反代） */
+function resolveHttpUrl(relative: string): string | undefined {
+  const wsUrl = useLanStore.getState().url
+  if (!wsUrl) return undefined
+  try {
+    const parsed = new URL(wsUrl)
+    parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:'
+    parsed.pathname = ''
+    parsed.search = ''
+    parsed.hash = ''
+    const base = parsed.toString().replace(/\/$/, '')
+    return new URL(relative, `${base}/`).toString()
+  } catch {
+    return undefined
+  }
+}
+
+/** 视频素材若服务器可提供 HTTP 流式拉流，返回对应地址（否则 undefined） */
+export function getLanAssetHttpUrl(assetId: string): string | undefined {
+  return httpAssetUrls.get(assetId)
+}
+
 /** 本地新增素材时向局域网广播（大文件分片 base64） */
 export async function pushAssetToLan(meta: AssetMeta, blob: Blob): Promise<void> {
   if (!isLanConnected()) return
@@ -773,6 +876,8 @@ export async function pushAssetToLan(meta: AssetMeta, blob: Blob): Promise<void>
       total,
       data: bufToB64(buf),
     })
+    // 每 8 块让出一次主线程，避免大视频长时间阻塞浏览器
+    if ((i & 7) === 7) await new Promise((r) => setTimeout(r, 0))
   }
 }
 
@@ -784,44 +889,54 @@ export function requestAssetFromLan(assetId: string): Promise<boolean> {
       return
     }
     const list = assetWaiters.get(assetId) ?? []
-    list.push(() => resolve(true))
+    list.push((ok) => resolve(ok))
     assetWaiters.set(assetId, list)
-    // 同一素材只发一次请求，避免多条传输流互相覆盖
+    // 同一素材只发一次请求，避免多条传输流互相覆盖。
+    // 超时改为“空闲超时”：只要分片持续到达就续期，长时间无数据（源端不在线/传输中断）才判定失败。
     if (!assetRequestsInFlight.has(assetId)) {
       assetRequestsInFlight.add(assetId)
+      scheduleAssetIdleTimeout(assetId)
       send({ t: 'asset-request', assetId })
     }
-
-    // 8s 超时
-    setTimeout(() => {
-      const pending = assetWaiters.get(assetId)
-      if (pending && pending.length > 0) {
-        // 只移除最早注册的这个 waiter
-        pending.shift()
-        if (pending.length === 0) {
-          assetWaiters.delete(assetId)
-          assetRequestsInFlight.delete(assetId)
-        }
-        resolve(false)
-      }
-    }, 8000)
   })
 }
 
 function receiveAssetMeta(msg: LanMessage): void {
   const asset = msg.asset as AssetMeta
   if (!asset?.id) return
+  // 该资产已可走 HTTP 流式拉流（视频），不再收集 WebSocket 分片；
+  // 但仍落一条元数据记录（不含 blob），供封面生成识别视频类型
+  if (httpAssetUrls.has(asset.id)) {
+    void db.assets.get(asset.id).then((rec) => {
+      const hasBlob = !!rec?.blob && rec.blob.size > 0
+      if (hasBlob || rec?.thumbnail) return
+      void db.assets
+        .put({
+          id: asset.id,
+          name: asset.name ?? '资源',
+          mime: asset.mime ?? 'video/mp4',
+          size: asset.size ?? 0,
+          kind: asset.kind ?? 'video',
+        } as AssetRecord)
+        .catch(() => {
+          // 落库失败不影响流式拉流
+        })
+    })
+    return
+  }
   const total = Math.max(1, Number(msg.totalChunks ?? 1))
   const existing = pendingAssets.get(asset.id)
   // 已有同源传输在收集时保留已收到的分片，避免覆盖丢失
-  if (existing && existing.total === total && existing.chunks.some((c) => c !== null)) {
+  if (existing && existing.total === total && existing.parts.some((p) => p !== null)) {
+    scheduleAssetIdleTimeout(asset.id)
     return
   }
   pendingAssets.set(asset.id, {
     meta: asset,
     total,
-    chunks: new Array(total).fill(null),
+    parts: new Array(total).fill(null),
   })
+  scheduleAssetIdleTimeout(asset.id)
 }
 
 function receiveAssetChunk(msg: LanMessage): void {
@@ -830,17 +945,25 @@ function receiveAssetChunk(msg: LanMessage): void {
   const pending = pendingAssets.get(assetId)
   if (!pending) return
   if (index < 0 || index >= pending.total) return
-  // 相同分片只保留第一个（多传输流重复时以先到为准）
-  // 剥掉分片自身的 base64 填充，整段拼接后统一补回，避免 atob 报非法字符
-  if (pending.chunks[index] === null) {
-    pending.chunks[index] = String(msg.data ?? '').replace(/=+$/, '')
+  // 有分片持续到达即续期空闲超时
+  scheduleAssetIdleTimeout(assetId)
+  // 相同分片只保留第一个（多传输流重复时以先到为准）；解码成独立字节分片，
+  // 收齐后由 Blob 惰性引用，不再先拼整个 base64 再 atob（大文件内存可减半）
+  if (pending.parts[index] === null) {
+    try {
+      pending.parts[index] = b64ToUint8(String(msg.data ?? '').replace(/=+$/, ''))
+    } catch {
+      // 非法分片数据，静默忽略
+    }
   }
-  if (pending.chunks.every((c) => c !== null)) {
+  if (pending.parts.every((p) => p !== null)) {
     pendingAssets.delete(assetId)
     assetRequestsInFlight.delete(assetId)
+    clearAssetIdleTimeout(assetId)
     try {
-      const binary = b64ToUint8(pending.chunks.join(''))
-      const blob = new Blob([binary], { type: pending.meta.mime || 'application/octet-stream' })
+      const blob = new Blob(pending.parts as BlobPart[], {
+        type: pending.meta.mime || 'application/octet-stream',
+      })
       void db.assets
         .put({
           id: pending.meta.id,
@@ -854,8 +977,7 @@ function receiveAssetChunk(msg: LanMessage): void {
           const waiters = assetWaiters.get(assetId)
           if (waiters) {
             assetWaiters.delete(assetId)
-            assetRequestsInFlight.delete(assetId)
-            for (const w of waiters) w()
+            for (const w of waiters) w(true)
           }
         })
     } catch {
@@ -868,32 +990,44 @@ async function respondAssetRequest(msg: LanMessage): Promise<void> {
   const assetId = String(msg.assetId ?? '')
   const from = String(msg.from ?? '')
   if (!assetId || !from) return
-  const record = await db.assets.get(assetId)
-  if (!record?.blob) return
-  send({
-    t: 'asset-meta',
-    to: from,
-    asset: {
-      id: record.id,
-      name: record.name,
-      mime: record.mime,
-      size: record.size,
-      kind: record.kind,
-    },
-    totalChunks: Math.max(1, Math.ceil(record.blob.size / CHUNK_SIZE)),
-  })
-  const total = Math.max(1, Math.ceil(record.blob.size / CHUNK_SIZE))
-  for (let i = 0; i < total; i++) {
-    const slice = record.blob.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
-    const buf = new Uint8Array(await slice.arrayBuffer())
+  // 同一接收方同素材只响应一次，避免接收端超时重试导致多路并发传输流互相覆盖
+  const key = `${assetId}:${from}`
+  if (sendingTargets.has(key)) return
+  sendingTargets.add(key)
+  try {
+    const record = await db.assets.get(assetId)
+    if (!record?.blob) return
     send({
-      t: 'asset-chunk',
+      t: 'asset-meta',
       to: from,
-      assetId,
-      index: i,
-      total,
-      data: bufToB64(buf),
+      asset: {
+        id: record.id,
+        name: record.name,
+        mime: record.mime,
+        size: record.size,
+        kind: record.kind,
+      },
+      totalChunks: Math.max(1, Math.ceil(record.blob.size / CHUNK_SIZE)),
     })
+    const total = Math.max(1, Math.ceil(record.blob.size / CHUNK_SIZE))
+    for (let i = 0; i < total; i++) {
+      const slice = record.blob.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+      const buf = new Uint8Array(await slice.arrayBuffer())
+      send({
+        t: 'asset-chunk',
+        to: from,
+        assetId,
+        index: i,
+        total,
+        data: bufToB64(buf),
+      })
+      // 每 8 块让出一次主线程，避免大视频长时间阻塞浏览器被判定无响应
+      if ((i & 7) === 7) await new Promise((r) => setTimeout(r, 0))
+    }
+  } catch {
+    // 连接可能已断开，忽略（finally 会释放发送标记）
+  } finally {
+    sendingTargets.delete(key)
   }
 }
 

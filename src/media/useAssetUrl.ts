@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { getAssetUrl, getThumbnailUrl } from './blobRegistry'
 import { toast } from '../store/uiStore'
 import { ensurePsdPreview } from './psdPreview'
+import { getLanAssetHttpUrl } from '../sync/lanClient'
 
 const MAX_ATTEMPTS = 5
 const RETRY_DELAY = 1200
@@ -51,15 +52,33 @@ export function useThumbnailUrl(assetId?: string): string | undefined {
       return
     }
     let alive = true
-    getThumbnailUrl(assetId)
-      .then((u) => {
-        if (alive) setUrl(u)
-      })
-      .catch(() => {
-        if (alive) setUrl(undefined)
-      })
+    let attempts = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const load = () => {
+      getThumbnailUrl(assetId)
+        .then((u) => {
+          if (alive) setUrl(u)
+        })
+        .catch(() => {
+          if (alive) setUrl(undefined)
+        })
+    }
+
+    const poll = () => {
+      if (!alive) return
+      load()
+      // 局域网视频封面依赖 asset-http 消息；httpUrl 未就绪时短轮询等待
+      if (!getLanAssetHttpUrl(assetId) && attempts < 16) {
+        attempts += 1
+        timer = setTimeout(poll, 500)
+      }
+    }
+
+    poll()
     return () => {
       alive = false
+      if (timer) clearTimeout(timer)
     }
   }, [assetId])
 

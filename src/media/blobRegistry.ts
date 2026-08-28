@@ -1,14 +1,37 @@
-import { db } from '../db/db'
+import { db, type AssetRecord } from '../db/db'
 import { downloadAssetFromOss, getOssThumb, isOssConfigured } from '../sync/ossClient'
 import { fetchCloudAssets } from '../sync/cloudSync'
-import { requestAssetFromLan } from '../sync/lanClient'
+import { getLanAssetHttpUrl, requestAssetFromLan } from '../sync/lanClient'
+import type { MediaKind } from '../types'
 
 const urlCache = new Map<string, string>()
 const thumbCache = new Map<string, string>()
+/** 正在生成封面缩略图的资产，防止多个节点并发重复抓帧 */
+const thumbnailGenerating = new Set<string>()
+/** 封面抓帧并发上限：避免多个隐藏 video 同时 seek 同一台服务器，占满浏览器连接池阻塞视频播放 */
+const THUMB_MAX_CONCURRENT = 2
+let thumbActive = 0
+const thumbQueue: Array<() => void> = []
+
+/** 获取抓帧并发槽位（槽位满则排队等待），返回释放函数 */
+function acquireThumbSlot(): Promise<() => void> {
+  return new Promise((resolve) => {
+    const run = () => {
+      thumbActive += 1
+      resolve(() => {
+        thumbActive -= 1
+        const next = thumbQueue.shift()
+        if (next) next()
+      })
+    }
+    if (thumbActive < THUMB_MAX_CONCURRENT) run()
+    else thumbQueue.push(run)
+  })
+}
 
 export function invalidateAssetUrl(assetId: string): void {
   const url = urlCache.get(assetId)
-  if (url) URL.revokeObjectURL(url)
+  if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
   urlCache.delete(assetId)
 }
 
@@ -50,6 +73,20 @@ async function fetchBlobFromCloud(assetId: string): Promise<void> {
 export async function getAssetUrl(assetId: string): Promise<string> {
   const cached = urlCache.get(assetId)
   if (cached) return cached
+  // 本地已有完整资源优先用本地（离线可用、行为与以往一致）
+  const local = await db.assets.get(assetId)
+  if (local?.blob instanceof Blob && local.blob.size > 0) {
+    const url = URL.createObjectURL(local.blob)
+    urlCache.set(assetId, url)
+    return url
+  }
+  // 视频：服务器可提供 HTTP Range 流式拉流时直接用（边下边播、可拖动进度），
+  // 避免把大视频整份下载到本地 IndexedDB 造成内存/磁盘压力
+  const httpUrl = getLanAssetHttpUrl(assetId)
+  if (httpUrl) {
+    urlCache.set(assetId, httpUrl)
+    return httpUrl
+  }
   const blob = await getAssetBlob(assetId)
   const url = URL.createObjectURL(blob)
   urlCache.set(assetId, url)
@@ -65,8 +102,9 @@ export async function getAssetBlob(assetId: string): Promise<Blob> {
     record = await db.assets.get(assetId)
   }
   if (!record || !(record.blob instanceof Blob)) {
-    // 局域网资源可能还在传输中，多尝试几次
-    for (let attempt = 0; attempt < 3 && !record; attempt++) {
+    // 局域网资源可能还在传输中。requestAssetFromLan 采用空闲超时（持续有分片即续期），
+    // 重试主要兜底“源端不在线”场景：失败后重发一次请求等待源端上线。
+    for (let attempt = 0; attempt < 2 && !record; attempt++) {
       const ok = await requestAssetFromLan(assetId)
       if (ok) record = await db.assets.get(assetId)
     }
@@ -76,24 +114,229 @@ export async function getAssetBlob(assetId: string): Promise<Blob> {
   return record.blob
 }
 
+/** 用视频源地址（本地 blob URL 或局域网 HTTP 流式地址）抓取视频画面生成封面 jpeg */
+function captureVideoThumbnailFromUrl(sourceUrl: string): Promise<Blob | undefined> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video')
+    video.muted = true
+    video.playsInline = true
+    video.preload = 'metadata'
+    video.src = sourceUrl
+    let settled = false
+    let captureAttempts = 0
+    const MAX_ATTEMPTS = 4
+
+    const finish = (blob?: Blob) => {
+      if (settled) return
+      settled = true
+      try {
+        video.removeAttribute('src')
+        video.load()
+      } catch {
+        // 忽略清理失败
+      }
+      resolve(blob)
+    }
+
+    video.onerror = () => finish()
+
+    /** 抓帧；画面为黑帧（未解码完成或恰为黑场）时自动 seek 到下一个采样点重试 */
+    const tryCapture = () => {
+      if (settled) return
+      try {
+        const w = video.videoWidth || 320
+        const h = video.videoHeight || 180
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          finish()
+          return
+        }
+        ctx.drawImage(video, 0, 0, w, h)
+        // 黑帧检测：平均亮度极低视为画面未解码完成或恰为黑场
+        let avg = 255
+        try {
+          const data = ctx.getImageData(0, 0, w, h).data
+          const stride = Math.max(1, Math.floor(data.length / 4000 / 4) * 4)
+          let sum = 0
+          let count = 0
+          for (let i = 0; i < data.length; i += stride) {
+            sum += data[i] + data[i + 1] + data[i + 2]
+            count += 3
+          }
+          avg = count > 0 ? sum / count : 255
+        } catch {
+          // 读取像素失败则按非黑帧处理，直接出图
+        }
+        const duration = video.duration || 0
+        if (avg < 8 && captureAttempts < MAX_ATTEMPTS && duration > 1) {
+          captureAttempts += 1
+          const target = Math.min(duration - 0.1, Math.max(0.1, (video.currentTime || 0) + duration * 0.25))
+          if (Math.abs(target - (video.currentTime || 0)) < 0.05) {
+            finish()
+            return
+          }
+          try {
+            video.currentTime = target
+            return // 等下一次 onseeked
+          } catch {
+            finish()
+            return
+          }
+        }
+        canvas.toBlob((blob) => finish(blob ?? undefined), 'image/jpeg', 0.75)
+      } catch {
+        finish()
+      }
+    }
+
+    // 用 loadedmetadata（而非 loadeddata）：局域网流式视频 preload=metadata 时 loadeddata 可能不触发
+    video.onloadedmetadata = () => {
+      try {
+        const duration = video.duration || 0
+        video.currentTime = duration > 2 ? duration / 2 : 0.1
+      } catch {
+        finish()
+      }
+    }
+
+    video.onseeked = () => {
+      // 等待画面实际渲染后再抓，避免拿到未解码的黑帧
+      const rvfc = (video as unknown as {
+        requestVideoFrameCallback?: (cb: () => void) => number
+      }).requestVideoFrameCallback
+      if (rvfc) {
+        try {
+          rvfc.call(video, () => tryCapture())
+          return
+        } catch {
+          // 回退到下面的延迟方案
+        }
+      }
+      setTimeout(tryCapture, 120)
+    }
+
+    // 兜底超时，避免视频无法加载时 Promise 挂起
+    setTimeout(() => finish(), 15000)
+  })
+}
+
+/** 视频资产本地无封面时，用本地 blob（peer 传输）或局域网 HTTP 流式地址抓帧生成并落库 */
+async function ensureVideoThumbnail(
+  record: AssetRecord | undefined,
+  assetId: string,
+): Promise<Blob | undefined> {
+  const isVideo =
+    record?.kind === 'video' || (record?.mime ?? '').startsWith('video/') || !!getLanAssetHttpUrl(assetId)
+  if (!isVideo) return undefined
+  if (thumbnailGenerating.has(assetId)) return undefined
+  thumbnailGenerating.add(assetId)
+  // 限制同时抓帧数量：并发 seek 会占满浏览器对同一主机的连接，阻塞视频播放
+  const release = await acquireThumbSlot()
+  try {
+    const hasLocal = !!record?.blob && record.blob.size > 0
+    const sourceUrl = hasLocal ? URL.createObjectURL(record.blob) : getLanAssetHttpUrl(assetId)
+    if (!sourceUrl) return undefined
+    const thumb = await captureVideoThumbnailFromUrl(sourceUrl)
+    if (hasLocal && sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl)
+    if (thumb) {
+      const base = record ?? { id: assetId, name: assetId, mime: 'video/mp4', size: 0, kind: 'video' as MediaKind }
+      await db.assets.put({ ...base, thumbnail: thumb } as AssetRecord)
+    }
+    return thumb
+  } finally {
+    release()
+    thumbnailGenerating.delete(assetId)
+  }
+}
+
+/** 判断图片 blob 是否为接近全黑（旧版本抓帧可能产出黑图，用于自检替换） */
+function isImageMostlyBlack(blob: Blob): Promise<boolean> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth || 32
+        canvas.height = img.naturalHeight || 32
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          URL.revokeObjectURL(url)
+          resolve(false)
+          return
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+        const stride = Math.max(1, Math.floor(data.length / 4000 / 4) * 4)
+        let sum = 0
+        let count = 0
+        for (let i = 0; i < data.length; i += stride) {
+          sum += data[i] + data[i + 1] + data[i + 2]
+          count += 3
+        }
+        URL.revokeObjectURL(url)
+        resolve(count > 0 ? sum / count < 8 : false)
+      } catch {
+        URL.revokeObjectURL(url)
+        resolve(false)
+      }
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(false)
+    }
+    img.src = url
+  })
+}
+
 export async function getThumbnailUrl(assetId: string): Promise<string | undefined> {
   const cached = thumbCache.get(assetId)
   if (cached) return cached
   let record = await db.assets.get(assetId)
-  if (!record || !(record.blob instanceof Blob)) {
-    if (record) await db.assets.delete(assetId)
+  const hasBlob = () => !!record?.blob && record.blob.size > 0
+  if (!hasBlob()) {
     await fetchBlobFromCloud(assetId)
     record = await db.assets.get(assetId)
-    if (!record || !(record.blob instanceof Blob)) return undefined
   }
-  if (!record.thumbnail) return undefined
-  const url = URL.createObjectURL(record.thumbnail)
-  thumbCache.set(assetId, url)
-  return url
+  const isVideo =
+    record?.kind === 'video' || (record?.mime ?? '').startsWith('video/') || !!getLanAssetHttpUrl(assetId)
+  // 已有封面（含局域网 meta-only 记录此前生成过封面）
+  if (record?.thumbnail) {
+    // 视频封面黑帧自检：旧版本抓帧可能产出黑图，检测到则重新抓帧替换
+    if (isVideo) {
+      const black = await isImageMostlyBlack(record.thumbnail)
+      if (black) {
+        const thumb = await ensureVideoThumbnail(record, assetId)
+        if (thumb) {
+          const url = URL.createObjectURL(thumb)
+          thumbCache.set(assetId, url)
+          return url
+        }
+      }
+    }
+    const url = URL.createObjectURL(record.thumbnail)
+    thumbCache.set(assetId, url)
+    return url
+  }
+  // 视频：本地有 blob（peer 传输）或走 HTTP 流式（服务器缓存）时，抓帧生成封面
+  if (isVideo && (hasBlob() || getLanAssetHttpUrl(assetId))) {
+    const thumb = await ensureVideoThumbnail(record, assetId)
+    if (thumb) {
+      const url = URL.createObjectURL(thumb)
+      thumbCache.set(assetId, url)
+      return url
+    }
+  }
+  return undefined
 }
 
 export function revokeAllUrls(): void {
-  for (const url of urlCache.values()) URL.revokeObjectURL(url)
+  for (const url of urlCache.values()) {
+    if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+  }
   for (const url of thumbCache.values()) URL.revokeObjectURL(url)
   urlCache.clear()
   thumbCache.clear()
