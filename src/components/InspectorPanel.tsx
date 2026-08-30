@@ -303,6 +303,9 @@ export function InspectorPanel() {
   )
   const selectedEdges = edges.filter((e) => e.selected)
 
+  const [fontSizeDraft, setFontSizeDraft] = useState('')
+  const [lineHeightDraft, setLineHeightDraft] = useState('')
+
   if (selectedEditableNodes.length === 0 && selectedEdges.length === 0) return null
 
   const applyEdgeStyle = (patch: Partial<EdgeStyle>) => {
@@ -582,13 +585,18 @@ export function InspectorPanel() {
                     type="number"
                     min={8}
                     max={200}
-                    value={firstNode.data.fontSize ?? ''}
+                    value={fontSizeDraft}
                     placeholder="输入字号 (px)"
-                    onChange={(e) => {
-                      const v = e.target.value
-                      updateNodeData(firstNode.id, {
-                        fontSize: v === '' ? undefined : Math.min(200, Math.max(8, Number(v))),
-                      })
+                    onChange={(e) => setFontSizeDraft(e.target.value)}
+                    onFocus={() => setFontSizeDraft(firstNode.data.fontSize != null ? String(firstNode.data.fontSize) : '')}
+                    onBlur={() => {
+                      const v = fontSizeDraft.trim()
+                      const n = v === '' ? undefined : Math.min(200, Math.max(8, Number(v)))
+                      updateNodeData(firstNode.id, { fontSize: n })
+                      setFontSizeDraft(n != null ? String(n) : '')
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur()
                     }}
                     className="mt-1 w-full rounded-md border border-edge2 bg-panel2 px-2 py-1.5 text-xs text-main outline-none focus:border-sky-500"
                   />
@@ -629,14 +637,18 @@ export function InspectorPanel() {
                     min={0.5}
                     max={5}
                     step={0.1}
-                    value={firstNode.data.lineHeight ?? ''}
+                    value={lineHeightDraft}
                     placeholder="输入行距 (倍)"
-                    onChange={(e) => {
-                      const v = e.target.value
-                      updateNodeData(firstNode.id, {
-                        lineHeight:
-                          v === '' ? undefined : Math.min(5, Math.max(0.5, Number(v))),
-                      })
+                    onChange={(e) => setLineHeightDraft(e.target.value)}
+                    onFocus={() => setLineHeightDraft(firstNode.data.lineHeight != null ? String(firstNode.data.lineHeight) : '')}
+                    onBlur={() => {
+                      const v = lineHeightDraft.trim()
+                      const n = v === '' ? undefined : Math.min(5, Math.max(0.5, Number(v)))
+                      updateNodeData(firstNode.id, { lineHeight: n })
+                      setLineHeightDraft(n != null ? String(n) : '')
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur()
                     }}
                     className="mt-1 w-full rounded-md border border-edge2 bg-panel2 px-2 py-1.5 text-xs text-main outline-none focus:border-sky-500"
                   />

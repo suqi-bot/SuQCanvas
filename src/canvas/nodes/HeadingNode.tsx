@@ -1,10 +1,11 @@
 import { memo, useEffect, useRef, useState } from 'react'
-import { NodeToolbar, Position, useReactFlow, type NodeProps } from '@xyflow/react'
+import { NodeToolbar, Position, type NodeProps } from '@xyflow/react'
 import type { HeadingLevelOrNone, SuqNode } from '../../types'
 import { useCanvasStore } from '../../store/canvasStore'
 import { MediaNodeShell } from './MediaNodeShell'
 import { buildTextStyle, V_JUSTIFY } from './textStyle'
 import { setLanEditing, clearLanEditing } from '../../sync/lanClient'
+import { ResizeHandles } from './ResizeHandles'
 
 const LEVEL_STYLE: Record<HeadingLevelOrNone, string> = {
   0: 'text-base font-normal',
@@ -13,44 +14,12 @@ const LEVEL_STYLE: Record<HeadingLevelOrNone, string> = {
   3: 'text-base font-medium',
 }
 
-const MIN_W = 120
-const MIN_H = 40
-
-const CORNERS = ['nw', 'ne', 'sw', 'se'] as const
-type Corner = (typeof CORNERS)[number]
-
-const CORNER_CURSOR: Record<Corner, string> = {
-  nw: 'nwse-resize',
-  ne: 'nesw-resize',
-  sw: 'nesw-resize',
-  se: 'nwse-resize',
-}
-
-const CORNER_POS: Record<Corner, string> = {
-  nw: 'left-0 top-0',
-  ne: 'right-0 top-0',
-  sw: 'left-0 bottom-0',
-  se: 'right-0 bottom-0',
-}
-
-interface ResizeState {
-  corner: Corner
-  x: number
-  y: number
-  w: number
-  h: number
-  fx: number
-  fy: number
-}
-
 export const HeadingNode = memo(function HeadingNode(props: NodeProps<SuqNode>) {
   const { id, data, selected } = props
   const level = (data.level ?? 1) as HeadingLevelOrNone
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
-  const { screenToFlowPosition } = useReactFlow()
   const [editing, setEditing] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const resizeRef = useRef<ResizeState | null>(null)
 
   useEffect(() => {
     if (data.autoEdit) {
@@ -73,72 +42,9 @@ export const HeadingNode = memo(function HeadingNode(props: NodeProps<SuqNode>) 
     return () => clearLanEditing()
   }, [editing, id, data.label, level])
 
-  useEffect(() => {
-    return () => {
-      resizeRef.current = null
-    }
-  }, [])
-
   const commit = (value: string) => {
     setEditing(false)
     updateNodeData(id, { text: value })
-  }
-
-  const onResizePointerDown = (corner: Corner) => (e: React.PointerEvent) => {
-    e.stopPropagation()
-    e.preventDefault()
-    const node = useCanvasStore.getState().nodes.find((n) => n.id === id)
-    if (!node) return
-    const base = screenToFlowPosition({ x: e.clientX, y: e.clientY })
-    resizeRef.current = {
-      corner,
-      x: node.position.x,
-      y: node.position.y,
-      w: (node.width as number | undefined) ?? (node.style?.width as number | undefined) ?? 200,
-      h: (node.height as number | undefined) ?? (node.style?.height as number | undefined) ?? 60,
-      fx: base.x,
-      fy: base.y,
-    }
-    const onMove = (ev: PointerEvent) => {
-      const r = resizeRef.current
-      if (!r) return
-      const cur = screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
-      const dx = cur.x - r.fx
-      const dy = cur.y - r.fy
-      let x = r.x
-      let y = r.y
-      let w = r.w
-      let h = r.h
-      if (r.corner.includes('w')) {
-        w = r.w - dx
-        x = r.x + dx
-      }
-      if (r.corner.includes('e')) w = r.w + dx
-      if (r.corner.includes('n')) {
-        h = r.h - dy
-        y = r.y + dy
-      }
-      if (r.corner.includes('s')) h = r.h + dy
-      if (w < MIN_W) {
-        if (r.corner.includes('w')) x = r.x + (r.w - MIN_W)
-        w = MIN_W
-      }
-      if (h < MIN_H) {
-        if (r.corner.includes('n')) y = r.y + (r.h - MIN_H)
-        h = MIN_H
-      }
-      useCanvasStore.getState().onNodesChange([
-        { id, type: 'position', position: { x, y } },
-        { id, type: 'dimensions', setAttributes: true, dimensions: { width: w, height: h } },
-      ])
-    }
-    const onUp = () => {
-      resizeRef.current = null
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
   }
 
   const style = LEVEL_STYLE[level]
@@ -211,18 +117,7 @@ export const HeadingNode = memo(function HeadingNode(props: NodeProps<SuqNode>) 
           </div>
         )}
       </div>
-      {selected && !editing && (
-        <>
-          {CORNERS.map((corner) => (
-            <div
-              key={corner}
-              className={`nodrag absolute z-10 h-2.5 w-2.5 rounded-sm border border-white/80 bg-sky-500 shadow ${CORNER_POS[corner]}`}
-              style={{ cursor: CORNER_CURSOR[corner] }}
-              onPointerDown={onResizePointerDown(corner)}
-            />
-          ))}
-        </>
-      )}
+      {selected && !editing && <ResizeHandles nodeId={id} />}
     </MediaNodeShell>
   )
 })

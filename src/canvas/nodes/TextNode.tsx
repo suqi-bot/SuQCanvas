@@ -8,9 +8,10 @@ import { MediaNodeShell } from './MediaNodeShell'
 import { FlowIcon } from './Icons'
 import { buildTextStyle, V_JUSTIFY } from './textStyle'
 import { setLanEditing, clearLanEditing } from '../../sync/lanClient'
+import { ResizeHandles } from './ResizeHandles'
 
 export const TextNode = memo(function TextNode(props: NodeProps<SuqNode>) {
-  const { id, data } = props
+  const { id, data, selected } = props
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const nodes = useCanvasStore((s) => s.nodes)
   const edges = useCanvasStore((s) => s.edges)
@@ -99,6 +100,7 @@ export const TextNode = memo(function TextNode(props: NodeProps<SuqNode>) {
           </div>
         )}
       </div>
+      {selected && !editing && <ResizeHandles nodeId={id} />}
     </MediaNodeShell>
   )
 })

@@ -57,9 +57,11 @@ export function invalidateAllAssetUrls(assetId: string): void {
 
 async function fetchBlobFromCloud(assetId: string): Promise<void> {
   if (!isOssConfigured()) return
+  const meta = (await fetchCloudAssets([assetId]))[0]
   const blob = await downloadAssetFromOss(assetId)
   if (!blob) return
-  const meta = (await fetchCloudAssets([assetId]))[0]
+  const mime = meta?.mime ?? 'application/octet-stream'
+  const typedBlob = blob.type ? blob : new Blob([blob], { type: mime })
   let thumb: Blob | undefined
   if (meta?.oss_thumb_key) {
     try {
@@ -71,10 +73,10 @@ async function fetchBlobFromCloud(assetId: string): Promise<void> {
   await db.assets.put({
     id: assetId,
     name: meta?.name ?? '资源',
-    mime: meta?.mime ?? 'application/octet-stream',
-    size: blob.size,
+    mime,
+    size: typedBlob.size,
     kind: meta?.kind ?? 'file',
-    blob,
+    blob: typedBlob,
     thumbnail: thumb,
   })
 }

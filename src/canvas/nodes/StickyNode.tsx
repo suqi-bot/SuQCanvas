@@ -5,9 +5,10 @@ import { useCanvasStore } from '../../store/canvasStore'
 import { MediaNodeShell } from './MediaNodeShell'
 import { buildTextStyle, V_JUSTIFY } from './textStyle'
 import { setLanEditing, clearLanEditing } from '../../sync/lanClient'
+import { ResizeHandles } from './ResizeHandles'
 
 export const StickyNode = memo(function StickyNode(props: NodeProps<SuqNode>) {
-  const { id, data } = props
+  const { id, data, selected } = props
   const color = STICKY_COLORS[data.color ?? 'yellow']
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const [editing, setEditing] = useState(false)
@@ -77,6 +78,7 @@ export const StickyNode = memo(function StickyNode(props: NodeProps<SuqNode>) {
           </div>
         )}
       </div>
+      {selected && !editing && <ResizeHandles nodeId={id} />}
     </MediaNodeShell>
   )
 })

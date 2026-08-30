@@ -76,7 +76,7 @@ export async function uploadAssetToOss(assetId: string, blob: Blob): Promise<str
   const c = await getOssClient()
   if (!c) return ''
   const key = assetKey(assetId)
-  await c.put(key, blob)
+  await c.put(key, blob, { mime: blob.type || undefined })
   return key
 }
 

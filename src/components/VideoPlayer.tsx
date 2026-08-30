@@ -583,7 +583,6 @@ export function VideoPlayerView({
           <div
             className={`${fullscreen ? 'absolute inset-0 flex items-center justify-center overflow-hidden bg-black' : 'relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black px-2 pt-2 sm:px-4 sm:pt-3'}`}
             onClick={toggle}
-            title={playing ? '点击暂停' : '点击播放'}
           >
         {url ? (
           <video

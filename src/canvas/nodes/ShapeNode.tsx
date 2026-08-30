@@ -5,9 +5,10 @@ import { useCanvasStore } from '../../store/canvasStore'
 import { MediaNodeShell } from './MediaNodeShell'
 import { buildTextStyle, V_JUSTIFY } from './textStyle'
 import { setLanEditing, clearLanEditing } from '../../sync/lanClient'
+import { ResizeHandles } from './ResizeHandles'
 
 export const ShapeNode = memo(function ShapeNode(props: NodeProps<SuqNode>) {
-  const { id, data } = props
+  const { id, data, selected } = props
   const shape = data.shape ?? 'rect'
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const [editing, setEditing] = useState(false)
@@ -78,6 +79,7 @@ export const ShapeNode = memo(function ShapeNode(props: NodeProps<SuqNode>) {
           )}
         </div>
       </div>
+      {selected && !editing && <ResizeHandles nodeId={id} />}
     </MediaNodeShell>
   )
 })
