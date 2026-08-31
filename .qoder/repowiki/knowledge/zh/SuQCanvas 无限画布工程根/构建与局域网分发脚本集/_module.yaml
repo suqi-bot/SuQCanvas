@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: build_scripts
+title: 构建与局域网分发脚本集
+scope:
+    - scripts/
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app

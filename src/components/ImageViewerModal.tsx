@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { DownloadIcon, ZoomInIcon, ZoomOutIcon } from '../canvas/nodes/Icons'
+import { DownloadIcon, OpenIcon, ZoomInIcon, ZoomOutIcon } from '../canvas/nodes/Icons'
+import { getAssetUrl } from '../media/blobRegistry'
 import { useAssetSourceUrl, useAssetUrl, usePsdPreviewUrl } from '../media/useAssetUrl'
-import { useUiStore } from '../store/uiStore'
+import { toast, useUiStore } from '../store/uiStore'
 
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 8
@@ -37,6 +38,26 @@ export function ImageViewerModal() {
   }, [viewer, close, fitZoom])
 
   if (!viewer) return null
+
+  const openInPs = async () => {
+    if (!viewer.assetId) return
+    try {
+      const blobUrl = await getAssetUrl(viewer.assetId)
+      const res = await fetch(blobUrl)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = viewer.name
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toast('PSD 已下载，在 Photoshop 中打开即可编辑', 'success')
+    } catch {
+      toast('下载失败', 'error')
+    }
+  }
 
   const fitImage = (width = naturalSize.width, height = naturalSize.height) => {
     if (!width || !height) return
@@ -85,6 +106,16 @@ export function ImageViewerModal() {
           >
             <DownloadIcon />
           </a>
+          {viewer.thumbnail && (
+            <button
+              type="button"
+              title="下载 PSD 并在 Photoshop 中打开"
+              className="rounded-md p-1.5 text-soft hover:bg-hover hover:text-main"
+              onClick={openInPs}
+            >
+              <OpenIcon />
+            </button>
+          )}
           <button
             type="button"
             className="ml-1 rounded-md px-2 py-1 text-sm text-mid hover:bg-hover hover:text-main"

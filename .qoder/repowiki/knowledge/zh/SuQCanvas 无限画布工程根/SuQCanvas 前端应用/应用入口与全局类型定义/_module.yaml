@@ -1,0 +1,14 @@
+schema_version: 1
+module_path: frontend_app/app_entry
+title: 应用入口与全局类型定义
+scope:
+    - src/App.tsx
+    - src/main.tsx
+    - src/index.css
+    - src/types.ts
+    - src/appVersion.ts
+    - src/buildMode.ts
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app/ui_pages

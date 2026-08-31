@@ -1,0 +1,21 @@
+schema_version: 1
+module_path: ""
+title: SuQCanvas 无限画布工程根
+scope:
+    - README.md
+    - .gitignore
+    - .oxlintrc.json
+    - index.html
+    - package.json
+    - package-lock.json
+    - tsconfig.json
+    - tsconfig.app.json
+    - tsconfig.node.json
+    - vite.config.ts
+    - .env.example
+    - .env.lan
+    - .env.online
+    - start-lan.bat
+source_files: []
+depends_on: []
+related_to: []

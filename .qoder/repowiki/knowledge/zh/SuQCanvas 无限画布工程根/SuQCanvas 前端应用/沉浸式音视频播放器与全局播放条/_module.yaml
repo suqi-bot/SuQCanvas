@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: frontend_app/media_player
+title: 沉浸式音视频播放器与全局播放条
+scope:
+    - src/components/AudioPlayer.tsx
+    - src/components/VideoPlayer.tsx
+    - src/components/GlobalPlayer.tsx
+    - src/components/SpectrumBars.tsx
+    - src/components/AudioBackground.tsx
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app/ui_pages

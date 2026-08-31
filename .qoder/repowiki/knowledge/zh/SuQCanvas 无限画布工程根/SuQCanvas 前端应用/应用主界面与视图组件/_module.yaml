@@ -1,0 +1,20 @@
+schema_version: 1
+module_path: frontend_app/ui_pages
+title: 应用主界面与视图组件
+scope:
+    - src/components/AuthPage.tsx
+    - src/components/HomePage.tsx
+    - src/components/PlayerPage.tsx
+    - src/components/InspectorPanel.tsx
+    - src/components/Toolbar.tsx
+    - src/components/LanPanel.tsx
+    - src/components/Toasts.tsx
+    - src/components/FileManagerModal.tsx
+    - src/components/ImageViewerModal.tsx
+    - src/components/MarkdownViewerModal.tsx
+    - src/components/PdfViewerModal.tsx
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app/app_entry
+    - path: frontend_app/media_player

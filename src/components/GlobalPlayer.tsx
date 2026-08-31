@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, ForwardIcon, PauseIcon, PlayIcon, RewindIcon } from '../canvas/nodes/Icons'
 import { registerAudio } from '../media/mediaCoordinator'
+import { closePip, isPipSupported, openPip } from '../media/pipWindow'
 import { findPlaylistByAsset, resolvePlaylistsCached } from '../media/playlists'
 import { bindPlayerAudio, notifyEngineEnded, usePlayerStore } from '../store/playerStore'
 import { useCanvasStore } from '../store/canvasStore'
@@ -102,6 +103,25 @@ export function GlobalPlayer() {
     el.muted = muted
   }, [volume, muted])
 
+  useEffect(() => {
+    const store = usePlayerStore
+    ;(window as any).__pipCtrl = {
+      getState: () => store.getState(),
+      toggle: () => store.getState().toggle(),
+      next: () => store.getState().next({ wrap: true }),
+      prev: () => store.getState().prev(),
+      seekRatio: (r: number) => {
+        const s = store.getState()
+        if (s.duration > 0) store.getState().seekTo(r * s.duration)
+      },
+    }
+    return () => { delete (window as any).__pipCtrl }
+  }, [])
+
+  useEffect(() => {
+    if (!track) closePip()
+  }, [track])
+
   const shown = barVisible && track !== null
   const name = track?.name ?? ''
 
@@ -197,7 +217,14 @@ export function GlobalPlayer() {
             <button type="button" title="快进 10 秒" className="rounded-full p-2 text-soft hover:bg-hover hover:text-main" onClick={() => onSeek(10)}><ForwardIcon /></button>
           </div>
           {!collapsed && (
-            <button type="button" title="隐藏悬浮窗（音乐继续播放）" className="rounded-full p-2 text-soft hover:bg-hover hover:text-main" onClick={onClose}><CloseIcon /></button>
+            <>
+              {isPipSupported() && (
+                <button type="button" title="最小化悬浮窗（桌面级小窗）" className="rounded-full p-2 text-soft hover:bg-hover hover:text-main" onClick={() => { openPip(); onClose() }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M14 14h6v6" /><rect x="14" y="14" width="6" height="6" rx="1" fill="currentColor" stroke="none" /></svg>
+                </button>
+              )}
+              <button type="button" title="隐藏悬浮窗（音乐继续播放）" className="rounded-full p-2 text-soft hover:bg-hover hover:text-main" onClick={onClose}><CloseIcon /></button>
+            </>
           )}
         </div>
       )}
