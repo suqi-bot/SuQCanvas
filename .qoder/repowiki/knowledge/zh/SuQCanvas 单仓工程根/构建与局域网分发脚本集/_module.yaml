@@ -7,3 +7,5 @@ source_files: []
 depends_on: []
 related_to:
     - path: frontend_app
+    - path: frontend_app/ui_pages
+    - path: promo_assets

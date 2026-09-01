@@ -31,7 +31,9 @@ export default function App() {
     if (IS_LAN_BUILD) return initLanSync()
   }, [])
 
-  const entered = user || guest
+  // 只依赖布尔值：Supabase token 自动刷新会产生新的 user 对象，
+  // 若依赖对象引用会导致 effect 重复执行、主页覆盖层被意外重新打开
+  const entered = Boolean(user || guest)
 
   useEffect(() => {
     if (!entered) return
