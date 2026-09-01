@@ -27,14 +27,41 @@ export interface ProjectRecord {
   viewport: Viewport
 }
 
+/** ali-oss 分片上传断点续传数据，不含不可序列化的 file 引用 */
+export interface OssCheckpointData {
+  /** OSS object key */
+  name: string
+  fileSize: number
+  partSize: number
+  uploadId: string
+  doneParts: Array<{ number: number; etag: string }>
+}
+
+export interface UploadCheckpointRecord {
+  /** 对应 AssetRecord.id，一个素材仅保留一条断点 */
+  assetId: string
+  /** 保存时的 OSS object key，与当前不一致则断点作废 */
+  key: string
+  /** 保存时的文件大小，与当前不一致则断点作废 */
+  fileSize: number
+  updatedAt: number
+  checkpoint: OssCheckpointData
+}
+
 export const db = new Dexie('suqcanvas') as Dexie & {
   assets: EntityTable<AssetRecord, 'id'>
   projects: EntityTable<ProjectRecord, 'id'>
+  uploadCheckpoints: EntityTable<UploadCheckpointRecord, 'assetId'>
 }
 
 db.version(1).stores({
   assets: 'id, kind, name',
   projects: 'id, updatedAt',
+})
+db.version(2).stores({
+  assets: 'id, kind, name',
+  projects: 'id, updatedAt',
+  uploadCheckpoints: 'assetId',
 })
 
 export async function requestPersistentStorage(): Promise<boolean> {
@@ -66,6 +93,7 @@ export async function gcAssets(): Promise<void> {
       if (a.orphanedAt) await db.assets.update(a.id, { orphanedAt: undefined })
     } else if (a.orphanedAt && now - a.orphanedAt > GC_RETENTION_MS) {
       await db.assets.delete(a.id)
+      await db.uploadCheckpoints.delete(a.id)
     } else if (!a.orphanedAt) {
       await db.assets.update(a.id, { orphanedAt: now })
     }
