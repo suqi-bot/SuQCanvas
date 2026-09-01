@@ -13,6 +13,7 @@ import { AuthPage } from './components/AuthPage'
 import { useProjectStore } from './store/projectStore'
 import { useUiStore } from './store/uiStore'
 import { useAuthStore } from './store/authStore'
+import { repairStuckUploads } from './store/uploadStore'
 import { initLanSync, autoReconnectLan } from './sync/lanClient'
 import { IS_LAN_BUILD } from './buildMode'
 
@@ -25,6 +26,7 @@ export default function App() {
   useEffect(() => {
     void useAuthStore.getState().init().then(() => {
       if (IS_LAN_BUILD) autoReconnectLan()
+      else void repairStuckUploads()
     })
     if (IS_LAN_BUILD) return initLanSync()
   }, [])

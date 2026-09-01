@@ -19,11 +19,15 @@ export const getOssClient: () => Promise<OssClientLike | null> = IS_ONLINE
     }
   : async () => null
 
-/** 上传媒体文件到 OSS，返回 oss_key */
-export const uploadAssetToOss: (assetId: string, blob: Blob) => Promise<string> = IS_ONLINE
-  ? async (assetId, blob) => {
-      const { uploadAssetToOss: real } = await import('./ossClientImpl')
-      return real(assetId, blob)
+/** 上传媒体文件到 OSS（带进度），返回 oss_key */
+export const uploadAssetToOssWithProgress: (
+  assetId: string,
+  blob: Blob,
+  onProgress: (ratio: number) => void,
+) => Promise<string> = IS_ONLINE
+  ? async (assetId, blob, onProgress) => {
+      const { uploadAssetToOssWithProgress: real } = await import('./ossClientImpl')
+      return real(assetId, blob, onProgress)
     }
   : async () => ''
 

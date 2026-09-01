@@ -15,6 +15,4 @@ scope:
     - src/components/PdfViewerModal.tsx
 source_files: []
 depends_on: []
-related_to:
-    - path: frontend_app/app_entry
-    - path: frontend_app/media_player
+related_to: []

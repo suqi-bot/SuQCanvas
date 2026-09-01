@@ -2,6 +2,9 @@ import Dexie, { type EntityTable } from 'dexie'
 import type { MediaKind, SuqEdge, SuqNode } from '../types'
 import type { Viewport } from '@xyflow/react'
 
+/** 云端上传状态：上传中 / 失败（可重试）/ 已成功 */
+export type CloudUploadState = 'uploading' | 'failed' | 'done'
+
 export interface AssetRecord {
   id: string
   name: string
@@ -11,6 +14,8 @@ export interface AssetRecord {
   blob: Blob
   thumbnail?: Blob
   orphanedAt?: number
+  /** 云端上传状态，仅在线版写入；失败后可在文件管理中重新上传 */
+  cloudStatus?: CloudUploadState
 }
 
 export interface ProjectRecord {

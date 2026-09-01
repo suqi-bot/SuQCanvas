@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: frontend_app/media_player/pip_window
+title: 桌面级画中画迷你播放器窗口
+scope:
+    - src/media/pipWindow.ts
+source_files: []
+depends_on: []
+related_to: []

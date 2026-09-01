@@ -26,15 +26,15 @@ export async function isCloudAuthed(): Promise<boolean> {
   return (await currentUserId()) !== null
 }
 
-/** 同步素材元数据到云端 assets 表 */
+/** 同步素材元数据到云端 assets 表，返回是否成功 */
 export async function upsertAssetMetaToCloud(
   meta: { id: string; name: string; mime: string; size: number; kind: MediaKind; hasThumbnail?: boolean },
   ossKey: string,
   ossThumbKey?: string,
-): Promise<void> {
-  if (!supabase) return
+): Promise<boolean> {
+  if (!supabase) return false
   const userId = await currentUserId()
-  if (!userId) return
+  if (!userId) return false
   const { error } = await supabase.from('assets').upsert({
     id: meta.id,
     user_id: userId,
@@ -46,7 +46,11 @@ export async function upsertAssetMetaToCloud(
     oss_thumb_key: ossThumbKey ?? null,
     has_thumbnail: meta.hasThumbnail ?? false,
   })
-  if (error) console.warn('同步素材元数据到云端失败:', error.message)
+  if (error) {
+    console.warn('同步素材元数据到云端失败:', error.message)
+    return false
+  }
+  return true
 }
 
 /** 删除云端素材元数据 */

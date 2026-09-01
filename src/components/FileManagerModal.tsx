@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CloseIcon, DownloadIcon, KindIcon, OpenIcon, SearchIcon, TrashIcon } from '../canvas/nodes/Icons'
+import { CheckIcon, CloseIcon, CloudUploadIcon, DownloadIcon, KindIcon, OpenIcon, SearchIcon, TrashIcon } from '../canvas/nodes/Icons'
 import { db, type AssetRecord } from '../db/db'
 import { formatBytes } from '../media/fileKind'
 import { getAssetUrl, invalidateAllAssetUrls } from '../media/blobRegistry'
@@ -8,6 +8,7 @@ import { useCanvasStore } from '../store/canvasStore'
 import { useLanStore } from '../store/lanStore'
 import { useProjectStore } from '../store/projectStore'
 import { toast, useUiStore } from '../store/uiStore'
+import { useUploadStore } from '../store/uploadStore'
 import type { MediaKind } from '../types'
 import { isMp3, collectFiles, type ManagedFile } from '../media/managedFile'
 import { AudioPlayerView } from './AudioPlayer'
@@ -67,6 +68,8 @@ export function FileManagerModal() {
   const removeAssets = useCanvasStore((state) => state.removeAssets)
   const editing = useLanStore((state) => state.editing)
   const selfId = useLanStore((state) => state.selfId)
+  const uploads = useUploadStore((state) => state.uploads)
+  const runCloudUpload = useUploadStore((state) => state.runCloudUpload)
   const [records, setRecords] = useState<Map<string, AssetRecord>>(new Map())
   const [query, setQuery] = useState('')
   const [selectedKind, setSelectedKind] = useState<MediaKind | 'all'>('all')
@@ -245,6 +248,18 @@ export function FileManagerModal() {
 
   const allVisibleSelected = visibleFiles.length > 0 && visibleFiles.every((file) => selectedIds.has(file.assetId))
 
+  // 重试云端上传：结束后从 IndexedDB 拉取最新记录，避免本地 records 缓存滑回旧的失败态
+  const retryUpload = async (assetId: string) => {
+    await runCloudUpload(assetId)
+    const fresh = await db.assets.get(assetId)
+    if (!fresh) return
+    setRecords((current) => {
+      const next = new Map(current)
+      next.set(assetId, fresh)
+      return next
+    })
+  }
+
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-app text-main">
       <div className="flex h-13 shrink-0 items-center gap-3 border-b border-edge bg-panel px-4">
@@ -373,7 +388,12 @@ export function FileManagerModal() {
             <span /><span>名称</span><span className="hidden lg:block">类型</span><span className="hidden lg:block">大小</span><span className="text-right">操作</span>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {visibleFiles.length > 0 ? visibleFiles.map((file) => (
+            {visibleFiles.length > 0 ? visibleFiles.map((file) => {
+              const upload = uploads[file.assetId]
+              // 实时状态以 uploadStore 为准；刷新页面后仅从记录中恢复失败态（残留的 uploading 启动时已修复为 failed）
+              const cloudState = upload?.state ?? (records.get(file.assetId)?.cloudStatus === 'failed' ? 'failed' : undefined)
+              const percent = Math.round((upload?.progress ?? 0) * 100)
+              return (
               <div
                 key={file.assetId}
                 className="grid min-h-12 grid-cols-[36px_minmax(0,1fr)_110px] items-center border-b border-edge px-3 hover:bg-hover/60 lg:grid-cols-[36px_minmax(180px,1fr)_110px_100px_110px]"
@@ -393,7 +413,41 @@ export function FileManagerModal() {
                   <span className="shrink-0 text-mid"><KindIcon kind={file.kind} /></span>
                   <span className="min-w-0">
                     <span className="block truncate text-xs text-main" title={file.name}>{file.name}</span>
-                    <span className="block truncate text-[10px] text-dim">{file.mime || '未知格式'} · {file.nodes.length} 个元素</span>
+                    {cloudState === 'uploading' ? (
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-1 w-24 shrink-0 overflow-hidden rounded-full bg-edge2">
+                          <span
+                            className="block h-full rounded-full bg-sky-500 transition-[width] duration-200"
+                            style={{ width: `${Math.max(5, percent)}%` }}
+                          />
+                        </span>
+                        <span className="text-[10px] tabular-nums text-dim">上传云端 {percent}%</span>
+                      </span>
+                    ) : cloudState === 'failed' ? (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        title="点击重新上传到云端"
+                        className="inline-flex items-center gap-1 text-[10px] text-rose-400 hover:text-rose-300"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void retryUpload(file.assetId)
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            void retryUpload(file.assetId)
+                          }
+                        }}
+                      >
+                        <CloudUploadIcon /> 云端上传失败 · 点击重试
+                      </span>
+                    ) : cloudState === 'done' ? (
+                      <span className="flex items-center gap-1 text-[10px] text-emerald-500"><CheckIcon /> 已上传云端</span>
+                    ) : (
+                      <span className="block truncate text-[10px] text-dim">{file.mime || '未知格式'} · {file.nodes.length} 个元素</span>
+                    )}
                   </span>
                 </button>
                 <span className="hidden text-xs text-soft lg:block">{KIND_LABELS[file.kind]}</span>
@@ -404,7 +458,8 @@ export function FileManagerModal() {
                   <button type="button" title="删除" className="rounded p-1.5 text-rose-500 hover:bg-rose-500/10" onClick={() => void deleteFiles([file])}><TrashIcon /></button>
                 </div>
               </div>
-            )) : (
+              )
+            }) : (
               <div className="flex h-full min-h-48 items-center justify-center text-xs text-dim">没有匹配的文件</div>
             )}
           </div>

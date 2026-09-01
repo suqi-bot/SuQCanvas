@@ -71,12 +71,31 @@ export async function getOssClient(): Promise<OSS | null> {
   return client
 }
 
-/** 上传媒体文件到 OSS，返回 oss_key */
-export async function uploadAssetToOss(assetId: string, blob: Blob): Promise<string> {
+// 大于该阈值走分片上传，以获得进度回调；小文件直接 put
+const MULTIPART_THRESHOLD = 10 * 1024 * 1024
+
+/** 上传媒体文件到 OSS（带进度），返回 oss_key */
+export async function uploadAssetToOssWithProgress(
+  assetId: string,
+  blob: Blob,
+  onProgress: (ratio: number) => void,
+): Promise<string> {
   const c = await getOssClient()
   if (!c) return ''
   const key = assetKey(assetId)
-  await c.put(key, blob, { mime: blob.type || undefined })
+  if (blob.size >= MULTIPART_THRESHOLD) {
+    await c.multipartUpload(key, blob, {
+      mime: blob.type || undefined,
+      partSize: 2 * 1024 * 1024,
+      parallel: 4,
+      progress: (percentage: number) => {
+        onProgress(Math.max(0, Math.min(1, percentage)))
+      },
+    })
+  } else {
+    await c.put(key, blob, { mime: blob.type || undefined })
+  }
+  onProgress(1)
   return key
 }
 

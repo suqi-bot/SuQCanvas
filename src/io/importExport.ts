@@ -6,8 +6,8 @@ import { useCanvasStore } from '../store/canvasStore'
 import { useProjectStore } from '../store/projectStore'
 import { useAuthStore } from '../store/authStore'
 import { toast } from '../store/uiStore'
-import { upsertAssetMetaToCloud, upsertProjectToCloud } from '../sync/cloudSync'
-import { uploadAssetToOss, uploadThumbToOss } from '../sync/ossClient'
+import { useUploadStore } from '../store/uploadStore'
+import { upsertProjectToCloud } from '../sync/cloudSync'
 import type { MediaKind, SuqEdge, SuqNode } from '../types'
 
 const FORMAT = 'sqcanvas'
@@ -162,36 +162,10 @@ export async function importProjectFile(file: File): Promise<void> {
   const authed = useAuthStore.getState().user !== null
   if (authed) {
     await upsertProjectToCloud(record)
+    // 复用带状态追踪的上传链路：失败的资源会在文件列表标出，可点击重新上传
     for (const asset of json.assets ?? []) {
-      const data = unzipped[`assets/${asset.id}.bin`]
-      if (!data) continue
-      const thumbData = unzipped[`assets/${asset.id}.thumb`]
-      const blob = new Blob([toArrayBuffer(data)], { type: asset.mime || 'application/octet-stream' })
-      const ossKey = await uploadAssetToOss(asset.id, blob)
-      if (!ossKey) continue
-      let ossThumbKey: string | undefined
-      if (thumbData) {
-        try {
-          ossThumbKey = await uploadThumbToOss(
-            asset.id,
-            new Blob([toArrayBuffer(thumbData)], { type: 'image/jpeg' }),
-          )
-        } catch {
-          // 缩略图上传失败不影响主文件
-        }
-      }
-      await upsertAssetMetaToCloud(
-        {
-          id: asset.id,
-          name: asset.name,
-          mime: asset.mime,
-          size: asset.size,
-          kind: asset.kind,
-          hasThumbnail: !!thumbData,
-        },
-        ossKey,
-        ossThumbKey,
-      )
+      if (!unzipped[`assets/${asset.id}.bin`]) continue
+      await useUploadStore.getState().runCloudUpload(asset.id)
     }
   } else {
     await db.projects.add(record)

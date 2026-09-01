@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: master
 nodes_managed: true
-exported_at: "2026-08-31T05:39:17Z"
+exported_at: "2026-08-31T07:14:12Z"
 modules:
     "":
-        dir_name: SuQCanvas 无限画布工程根
-        title: SuQCanvas 无限画布工程根
+        dir_name: SuQCanvas 单仓根工程
+        title: SuQCanvas 单仓根工程
         scope:
             - README.md
             - .gitignore
@@ -67,11 +67,10 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to:
-            - path: frontend_app/ui_pages
+        related_to: []
     frontend_app/media_player:
-        dir_name: 沉浸式音视频播放器与全局播放条
-        title: 沉浸式音视频播放器与全局播放条
+        dir_name: 媒体播放器组件集
+        title: 媒体播放器组件集
         scope:
             - src/components/AudioPlayer.tsx
             - src/components/VideoPlayer.tsx
@@ -79,10 +78,19 @@ modules:
             - src/components/SpectrumBars.tsx
             - src/components/AudioBackground.tsx
         source_files: []
+        children:
+            - frontend_app/media_player/pip_window
+        depends_on: []
+        related_to: []
+    frontend_app/media_player/pip_window:
+        dir_name: 桌面级画中画迷你播放器窗口
+        title: 桌面级画中画迷你播放器窗口
+        scope:
+            - src/media/pipWindow.ts
+        source_files: []
         children: []
         depends_on: []
-        related_to:
-            - path: frontend_app/ui_pages
+        related_to: []
     frontend_app/ui_pages:
         dir_name: 应用主界面与视图组件
         title: 应用主界面与视图组件
@@ -101,9 +109,7 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to:
-            - path: frontend_app/app_entry
-            - path: frontend_app/media_player
+        related_to: []
     promo_assets:
         dir_name: SuQCanvas 宣传片与演示素材工程
         title: SuQCanvas 宣传片与演示素材工程

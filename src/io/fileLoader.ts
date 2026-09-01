@@ -11,8 +11,7 @@ import type {
   SuqNode,
 } from '../types'
 import { toast } from '../store/uiStore'
-import { isOssConfigured, uploadAssetToOss, uploadThumbToOss } from '../sync/ossClient'
-import { isCloudAuthed, upsertAssetMetaToCloud } from '../sync/cloudSync'
+import { useUploadStore } from '../store/uploadStore'
 import { isLanConnected, pushAssetToLan } from '../sync/lanClient'
 import { STICKY_COLORS } from '../types'
 import { generatePsdPreview } from '../media/psdPreview'
@@ -58,22 +57,6 @@ function captureVideoThumbnail(file: File): Promise<Blob> {
   })
 }
 
-async function syncAssetToCloud(meta: AssetMeta, blob: Blob, thumbnail?: Blob): Promise<void> {
-  if (!isCloudAuthed()) return
-  if (!isOssConfigured()) return
-  const ossKey = await uploadAssetToOss(meta.id, blob)
-  if (!ossKey) return
-  let ossThumbKey: string | undefined
-  if (thumbnail) {
-    try {
-      ossThumbKey = await uploadThumbToOss(meta.id, thumbnail)
-    } catch {
-      // 缩略图上传失败不影响主文件
-    }
-  }
-  await upsertAssetMetaToCloud(meta, ossKey, ossThumbKey)
-}
-
 export async function putAsset(file: File): Promise<AssetMeta> {
   const kind = detectKind(file)
   const id = genId('a')
@@ -109,10 +92,8 @@ export async function putAsset(file: File): Promise<AssetMeta> {
       toast(`「${file.name}」局域网分发失败`, 'error')
     })
   }
-  void syncAssetToCloud(meta, file, thumbnail).catch((err) => {
-    console.warn('素材同步到 OSS 失败:', file.name, err)
-    toast(`「${file.name}」上传云端失败`, 'error')
-  })
+  // 云端上传带状态追踪：失败会在文件列表标出，可点击重新上传
+  void useUploadStore.getState().runCloudUpload(id)
   return meta
 }
 
@@ -131,7 +112,7 @@ export async function updateAssetText(assetId: string, text: string): Promise<vo
     hasThumbnail: Boolean(record.thumbnail),
   }
   if (isLanConnected()) void pushAssetToLan(meta, blob, record.thumbnail)
-  void syncAssetToCloud(meta, blob, record.thumbnail)
+  void useUploadStore.getState().runCloudUpload(assetId)
 }
 
 const KIND_TO_TYPE: Record<MediaKind, string> = {

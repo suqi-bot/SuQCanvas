@@ -126,6 +126,24 @@ export function DownloadIcon(props: IconProps) {
   )
 }
 
+export function CloudUploadIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M6.5 19a4.5 4.5 0 0 1-.42-8.98 6 6 0 0 1 11.7 1.2A4 4 0 0 1 18 19" />
+      <path d="M12 16v-6" />
+      <path d="M9.5 12.5L12 10l2.5 2.5" />
+    </Base>
+  )
+}
+
+export function CheckIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4 12.5l5 5L20 6.5" />
+    </Base>
+  )
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <Base {...props}>
