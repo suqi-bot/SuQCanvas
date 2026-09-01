@@ -11,7 +11,18 @@
 - [src/sync/lanClient.ts](file://src/sync/lanClient.ts)
 - [server/lan-server.mjs](file://server/lan-server.mjs)
 - [docs/LEARNING.md](file://docs/LEARNING.md)
+- [src/store/uploadStore.ts](file://src/store/uploadStore.ts)
+- [src/components/FileManagerModal.tsx](file://src/components/FileManagerModal.tsx)
+- [src/App.tsx](file://src/App.tsx)
+- [src/sync/assetCloudUpload.ts](file://src/sync/assetCloudUpload.ts)
 </cite>
+
+## 更新摘要
+**变更内容**
+- 新增 AssetRecord 接口的 cloudStatus 字段支持云端上传状态管理
+- 实现上传状态持久化机制，支持中断恢复和页面刷新后状态显示
+- 添加上传修复机制，处理异常中断的上传任务
+- 增强用户界面以显示云端上传状态和重试功能
 
 ## 目录
 1. [简介](#简介)
@@ -26,7 +37,7 @@
 10. [附录：增删改查示例路径](#附录增删改查示例路径)
 
 ## 简介
-本文件系统性地说明基于 Dexie 的 IndexedDB 存储设计，涵盖数据库初始化、版本与表结构、数据模型（AssetRecord、ProjectRecord）、持久化请求机制（含浏览器存储权限申请与降级策略）、垃圾回收机制（孤立资源检测、保留策略、自动清理），并提供可落地的增删改查操作参考路径。同时给出性能优化建议与最佳实践，帮助在大型媒体场景下稳定高效地管理本地缓存与离线能力。
+本文件系统性地说明基于 Dexie 的 IndexedDB 存储设计，涵盖数据库初始化、版本与表结构、数据模型（AssetRecord、ProjectRecord）、持久化请求机制（含浏览器存储权限申请与降级策略）、垃圾回收机制（孤立资源检测、保留策略、自动清理），以及新增的云端上传状态管理功能。同时提供可落地的增删改查操作参考路径。同时给出性能优化建议与最佳实践，帮助在大型媒体场景下稳定高效地管理本地缓存与离线能力。
 
 ## 项目结构
 IndexedDB 相关代码主要分布在以下模块：
@@ -37,6 +48,10 @@ IndexedDB 相关代码主要分布在以下模块：
 - 文件加载与文本素材写入：src/io/fileLoader.ts
 - 导入导出（打包 assets）：src/io/importExport.ts
 - 局域网同步与分片传输落库：src/sync/lanClient.ts
+- 云端上传状态管理：src/store/uploadStore.ts
+- 云端上传逻辑：src/sync/assetCloudUpload.ts
+- 文件管理器界面：src/components/FileManagerModal.tsx
+- 应用启动与状态修复：src/App.tsx
 - 局域网服务端维护与持久化：server/lan-server.mjs
 - 整体架构说明：docs/LEARNING.md
 
@@ -44,21 +59,24 @@ IndexedDB 相关代码主要分布在以下模块：
 graph TB
 A["应用层<br/>项目/画布状态"] --> B["项目存储<br/>projectStore.ts"]
 A --> C["资产访问<br/>blobRegistry.ts"]
-B --> D["Dexie 数据库<br/>db.ts"]
-C --> D
-C --> E["云端/OSS<br/>cloudSync/ossClient"]
-C --> F["局域网中继<br/>lanClient.ts / lan-server.mjs"]
-B --> G["云端/局域网<br/>云同步/局域网广播"]
+A --> D["上传状态管理<br/>uploadStore.ts"]
+B --> E["Dexie 数据库<br/>db.ts"]
+C --> E
+D --> E
+C --> F["云端/OSS<br/>cloudSync/ossClient"]
+C --> G["局域网中继<br/>lanClient.ts / lan-server.mjs"]
+D --> H["云端上传<br/>assetCloudUpload.ts"]
+B --> I["云端/局域网<br/>云同步/局域网广播"]
 ```
 
-图表来源
+**图表来源**
 - [src/store/projectStore.ts:196-228](file://src/store/projectStore.ts#L196-L228)
 - [src/media/blobRegistry.ts:84-126](file://src/media/blobRegistry.ts#L84-L126)
 - [src/db/db.ts:25-33](file://src/db/db.ts#L25-L33)
-- [src/sync/lanClient.ts:1156-1169](file://src/sync/lanClient.ts#L1156-L1169)
-- [server/lan-server.mjs:351-372](file://server/lan-server.mjs#L351-L372)
+- [src/store/uploadStore.ts:25-75](file://src/store/uploadStore.ts#L25-L75)
+- [src/sync/assetCloudUpload.ts:15-44](file://src/sync/assetCloudUpload.ts#L15-L44)
 
-章节来源
+**章节来源**
 - [src/db/db.ts:25-33](file://src/db/db.ts#L25-L33)
 - [src/store/projectStore.ts:196-228](file://src/store/projectStore.ts#L196-L228)
 - [src/media/blobRegistry.ts:84-126](file://src/media/blobRegistry.ts#L84-L126)
@@ -66,31 +84,38 @@ B --> G["云端/局域网<br/>云同步/局域网广播"]
 ## 核心组件
 - 数据库实例与表结构：通过 Dexie 创建名为 suqcanvas 的数据库，定义 assets 与 projects 两张表，并声明索引字段。
 - 数据模型：
-  - AssetRecord：记录媒体资源的元数据与二进制内容（Blob），包含可选缩略图与孤立标记时间戳。
+  - AssetRecord：记录媒体资源的元数据与二进制内容（Blob），包含可选缩略图、孤立标记时间戳以及云端上传状态。
   - ProjectRecord：记录项目名称、时间戳、画布图（节点与边）以及视口信息。
 - 持久化请求：提供浏览器持久化存储权限申请接口，失败时静默降级。
 - 垃圾回收：扫描项目引用，标记或清理孤立资源，支持保留期策略。
+- **新增** 云端上传状态管理：跟踪资产的云端上传状态（uploading、failed、done），支持中断恢复和重试机制。
 
-章节来源
+**章节来源**
 - [src/db/db.ts:5-33](file://src/db/db.ts#L5-L33)
-- [src/db/db.ts:35-68](file://src/db/db.ts#L35-L68)
+- [src/db/db.ts:35-68](file://src/db/db.ts#L35-68)
 - [src/types.ts:3-14](file://src/types.ts#L3-L14)
 - [src/types.ts:37-44](file://src/types.ts#L37-L44)
 - [src/types.ts:66-107](file://src/types.ts#L66-L107)
 
 ## 架构总览
-前端以 IndexedDB 为本地缓存中心，结合云端（Supabase + OSS）与局域网中继实现多端协同与离线可用。项目数据（画布 JSON）走云端，媒体大文件优先走局域网 HTTP Range 流式播放，必要时回退到本地 Blob 或云端下载。
+前端以 IndexedDB 为本地缓存中心，结合云端（Supabase + OSS）与局域网中继实现多端协同与离线可用。项目数据（画布 JSON）走云端，媒体大文件优先走局域网 HTTP Range 流式播放，必要时回退到本地 Blob 或云端下载。**新增的云端上传状态管理功能确保上传过程的可恢复性和用户体验的一致性。**
 
 ```mermaid
 sequenceDiagram
 participant UI as "界面"
 participant PS as "项目存储(projectStore)"
+participant US as "上传状态(uploadStore)"
 participant DB as "Dexie(db)"
 participant BR as "资产访问(blobRegistry)"
 participant LAN as "局域网(lanClient/lan-server)"
 participant CLOUD as "云端(OSS/Supabase)"
 UI->>PS : 打开/新建/重命名/保存项目
 PS->>DB : 读写 projects 表
+UI->>US : 触发云端上传
+US->>DB : 更新 cloudStatus 状态
+US->>CLOUD : 执行上传流程
+CLOUD-->>US : 返回上传结果
+US->>DB : 持久化最终状态
 UI->>BR : 获取资源URL/缩略图
 BR->>DB : 读取 assets 表(本地缓存)
 alt 本地无完整资源
@@ -103,13 +128,13 @@ end
 BR-->>UI : 返回URL/缩略图
 ```
 
-图表来源
+**图表来源**
 - [src/store/projectStore.ts:196-228](file://src/store/projectStore.ts#L196-L228)
+- [src/store/uploadStore.ts:25-75](file://src/store/uploadStore.ts#L25-L75)
 - [src/media/blobRegistry.ts:84-126](file://src/media/blobRegistry.ts#L84-L126)
-- [src/sync/lanClient.ts:1156-1169](file://src/sync/lanClient.ts#L1156-L1169)
-- [server/lan-server.mjs:351-372](file://server/lan-server.mjs#L351-L372)
+- [src/sync/assetCloudUpload.ts:15-44](file://src/sync/assetCloudUpload.ts#L15-L44)
 
-章节来源
+**章节来源**
 - [docs/LEARNING.md:1-25](file://docs/LEARNING.md#L1-L25)
 
 ## 详细组件分析
@@ -125,10 +150,10 @@ NewDexie --> DefineTables["定义 assets/projects 表及索引"]
 DefineTables --> Ready(["数据库就绪"])
 ```
 
-图表来源
+**图表来源**
 - [src/db/db.ts:25-33](file://src/db/db.ts#L25-L33)
 
-章节来源
+**章节来源**
 - [src/db/db.ts:25-33](file://src/db/db.ts#L25-L33)
 
 ### 数据模型设计与字段含义
@@ -137,13 +162,15 @@ DefineTables --> Ready(["数据库就绪"])
   - blob：原始二进制内容，用于本地缓存与离线播放。
   - thumbnail：可选缩略图，提升列表渲染性能。
   - orphanedAt：孤立标记时间戳，配合垃圾回收策略进行清理。
+  - **新增** cloudStatus：云端上传状态，支持 'uploading'（上传中）、'failed'（失败可重试）、'done'（已成功）三种状态。
 - ProjectRecord
   - id/name/createdAt/updatedAt：项目标识、名称、创建与更新时间。
   - graph：画布图，包含 nodes 与 edges，对应可视化编辑器中的节点与连线。
   - viewport：视口位置与缩放，保证恢复编辑体验一致。
 
-章节来源
+**章节来源**
 - [src/db/db.ts:5-23](file://src/db/db.ts#L5-L23)
+- [src/db/db.ts:17-18](file://src/db/db.ts#L17-L18)
 - [src/types.ts:3-14](file://src/types.ts#L3-L14)
 - [src/types.ts:37-44](file://src/types.ts#L37-L44)
 - [src/types.ts:66-107](file://src/types.ts#L66-L107)
@@ -162,10 +189,10 @@ Result -- 否 --> Fallback["忽略异常并返回false"]
 CheckAPI -- 否 --> Fallback
 ```
 
-图表来源
+**图表来源**
 - [src/db/db.ts:35-44](file://src/db/db.ts#L35-L44)
 
-章节来源
+**章节来源**
 - [src/db/db.ts:35-44](file://src/db/db.ts#L35-L44)
 
 ### 垃圾回收机制：孤立资源检测、保留策略、自动清理
@@ -190,11 +217,47 @@ Keep --> End
 MarkOrphan --> End
 ```
 
-图表来源
+**图表来源**
 - [src/db/db.ts:46-68](file://src/db/db.ts#L46-L68)
 
-章节来源
+**章节来源**
 - [src/db/db.ts:46-68](file://src/db/db.ts#L46-L68)
+
+### 云端上传状态管理机制
+**新增功能** 云端上传状态管理确保上传过程的可靠性和用户体验：
+
+- **状态定义**：CloudUploadState 枚举包含 'uploading'（上传中）、'failed'（失败可重试）、'done'（已成功）三种状态。
+- **状态持久化**：上传过程中实时更新 cloudStatus 字段到 IndexedDB，确保页面刷新后状态可恢复。
+- **中断恢复**：应用启动时检查残留的 uploading 状态，将其修复为 failed 状态以便用户重试。
+- **进度追踪**：实时显示上传进度，支持节流避免频繁重渲染。
+- **用户界面**：文件管理器中显示上传状态，支持失败重试和成功提示。
+
+```mermaid
+sequenceDiagram
+participant App as "应用启动"
+participant US as "上传状态管理"
+participant DB as "数据库"
+participant UI as "文件管理器"
+App->>US : repairStuckUploads()
+US->>DB : 查找 cloudStatus='uploading' 的记录
+DB-->>US : 返回卡住的上传任务
+US->>DB : 更新状态为 'failed'
+Note over US,DB : 允许用户重试
+UI->>DB : 读取资产状态
+DB-->>UI : 返回 cloudStatus
+UI->>UI : 显示相应状态和按钮
+```
+
+**图表来源**
+- [src/App.tsx:26-32](file://src/App.tsx#L26-L32)
+- [src/store/uploadStore.ts:77-84](file://src/store/uploadStore.ts#L77-L84)
+- [src/components/FileManagerModal.tsx:392-395](file://src/components/FileManagerModal.tsx#L392-L395)
+
+**章节来源**
+- [src/db/db.ts:5-18](file://src/db/db.ts#L5-L18)
+- [src/store/uploadStore.ts:25-84](file://src/store/uploadStore.ts#L25-L84)
+- [src/components/FileManagerModal.tsx:392-455](file://src/components/FileManagerModal.tsx#L392-L455)
+- [src/App.tsx:26-32](file://src/App.tsx#L26-L32)
 
 ### 项目存储与自动保存
 - 新建/重命名/保存项目：根据是否登录云端账号决定写入云端或本地 IndexedDB；未登录用户仅本地持久化。
@@ -214,11 +277,11 @@ DB-->>PS : 保存成功
 PS->>LAN : 广播项目变更
 ```
 
-图表来源
+**图表来源**
 - [src/store/projectStore.ts:46-67](file://src/store/projectStore.ts#L46-L67)
 - [src/store/projectStore.ts:196-228](file://src/store/projectStore.ts#L196-L228)
 
-章节来源
+**章节来源**
 - [src/store/projectStore.ts:46-67](file://src/store/projectStore.ts#L46-L67)
 - [src/store/projectStore.ts:196-228](file://src/store/projectStore.ts#L196-L228)
 
@@ -253,12 +316,12 @@ end
 end
 ```
 
-图表来源
+**图表来源**
 - [src/media/blobRegistry.ts:84-126](file://src/media/blobRegistry.ts#L84-L126)
 - [src/media/blobRegistry.ts:310-379](file://src/media/blobRegistry.ts#L310-L379)
 - [src/sync/lanClient.ts:1156-1169](file://src/sync/lanClient.ts#L1156-L1169)
 
-章节来源
+**章节来源**
 - [src/media/blobRegistry.ts:84-126](file://src/media/blobRegistry.ts#L84-L126)
 - [src/media/blobRegistry.ts:310-379](file://src/media/blobRegistry.ts#L310-L379)
 
@@ -266,7 +329,7 @@ end
 - 将文本内容转换为 Blob 并写入 assets 表，随后推送到局域网与云端进行同步。
 - 根据媒体类型映射合适的 MIME 类型，确保正确解析与预览。
 
-章节来源
+**章节来源**
 - [src/io/fileLoader.ts:121-135](file://src/io/fileLoader.ts#L121-L135)
 - [src/io/fileLoader.ts:137-163](file://src/io/fileLoader.ts#L137-L163)
 
@@ -274,7 +337,7 @@ end
 - 导出项目时，收集项目中引用的资产，将其二进制与缩略图一并打包为 ZIP，便于迁移与备份。
 - 导入时按资产 ID 匹配并还原资源。
 
-章节来源
+**章节来源**
 - [src/io/importExport.ts:44-78](file://src/io/importExport.ts#L44-L78)
 
 ### 局域网分片传输与落库
@@ -282,14 +345,50 @@ end
 - 落库：将资源与缩略图写入 assets 表，并通知等待者。
 - 服务器侧：提供 HTTP Range 流式服务，支持跨源 CORS 头，便于网页直接流式播放。
 
-章节来源
+**章节来源**
 - [src/sync/lanClient.ts:1138-1173](file://src/sync/lanClient.ts#L1138-L1173)
 - [server/lan-server.mjs:351-372](file://server/lan-server.mjs#L351-L372)
+
+### 云端上传流程实现
+**新增功能** 完整的云端上传流程，包含状态管理和错误处理：
+
+- **环境检查**：验证 OSS 配置和登录状态，确定是否执行云端上传。
+- **分片上传**：支持大文件分片上传，带进度回调和错误重试。
+- **元数据同步**：上传完成后同步资产元数据到 Supabase。
+- **状态管理**：实时更新 cloudStatus 字段，支持中断恢复。
+- **用户体验**：提供进度显示、失败重试和成功反馈。
+
+```mermaid
+flowchart TD
+Start(["开始上传"]) --> CheckEnv{"检查上传环境"}
+CheckEnv -- 不满足 --> Abort["终止上传"]
+CheckEnv -- 满足 --> UploadOss["上传主文件到OSS"]
+UploadOss --> UploadThumb{"有缩略图?"}
+UploadThumb -- 是 --> UploadThumbToOss["上传缩略图"]
+UploadThumb -- 否 --> SyncMeta["同步元数据"]
+UploadThumbToOss --> SyncMeta
+SyncMeta --> UpdateStatus{"上传成功?"}
+UpdateStatus -- 是 --> SetDone["设置 cloudStatus='done'"]
+UpdateStatus -- 否 --> SetFailed["设置 cloudStatus='failed'"]
+SetDone --> Complete(["完成"])
+SetFailed --> Retry["可重试"]
+Retry --> Complete
+Abort --> Complete
+```
+
+**图表来源**
+- [src/sync/assetCloudUpload.ts:15-44](file://src/sync/assetCloudUpload.ts#L15-44)
+- [src/store/uploadStore.ts:27-74](file://src/store/uploadStore.ts#L27-L74)
+
+**章节来源**
+- [src/sync/assetCloudUpload.ts:1-45](file://src/sync/assetCloudUpload.ts#L1-L45)
+- [src/store/uploadStore.ts:25-84](file://src/store/uploadStore.ts#L25-L84)
 
 ## 依赖关系分析
 - projectStore 依赖 db 进行项目读写，并通过 cloudSync/lanClient 与云端/局域网交互。
 - blobRegistry 依赖 db 进行资产读写，并通过 lanClient/ossClient/cloudSync 获取远程资源。
 - fileLoader/importExport 依赖 db 进行资产存取与打包。
+- **新增** uploadStore 依赖 db 进行上传状态管理，并通过 assetCloudUpload 执行云端上传。
 - lan-client/server 共同协作，实现局域网内资源分发与流式播放。
 
 ```mermaid
@@ -302,22 +401,29 @@ BR --> LAN
 BR --> CLOUD
 FL["fileLoader.ts"] --> DB
 IE["importExport.ts"] --> DB
+US["uploadStore.ts"] --> DB
+US --> ACU["assetCloudUpload.ts"]
+ACU --> CLOUD
 LAN_S["lan-server.mjs"] --> LAN
 ```
 
-图表来源
+**图表来源**
 - [src/store/projectStore.ts:196-228](file://src/store/projectStore.ts#L196-L228)
 - [src/media/blobRegistry.ts:84-126](file://src/media/blobRegistry.ts#L84-L126)
 - [src/io/fileLoader.ts:121-135](file://src/io/fileLoader.ts#L121-L135)
 - [src/io/importExport.ts:44-78](file://src/io/importExport.ts#L44-L78)
+- [src/store/uploadStore.ts:25-84](file://src/store/uploadStore.ts#L25-L84)
+- [src/sync/assetCloudUpload.ts:15-44](file://src/sync/assetCloudUpload.ts#L15-L44)
 - [src/sync/lanClient.ts:1156-1169](file://src/sync/lanClient.ts#L1156-L1169)
 - [server/lan-server.mjs:351-372](file://server/lan-server.mjs#L351-L372)
 
-章节来源
+**章节来源**
 - [src/store/projectStore.ts:196-228](file://src/store/projectStore.ts#L196-L228)
 - [src/media/blobRegistry.ts:84-126](file://src/media/blobRegistry.ts#L84-L126)
 - [src/io/fileLoader.ts:121-135](file://src/io/fileLoader.ts#L121-L135)
 - [src/io/importExport.ts:44-78](file://src/io/importExport.ts#L44-L78)
+- [src/store/uploadStore.ts:25-84](file://src/store/uploadStore.ts#L25-L84)
+- [src/sync/assetCloudUpload.ts:15-44](file://src/sync/assetCloudUpload.ts#L15-L44)
 - [src/sync/lanClient.ts:1156-1169](file://src/sync/lanClient.ts#L1156-L1169)
 - [server/lan-server.mjs:351-372](file://server/lan-server.mjs#L351-L372)
 
@@ -327,25 +433,26 @@ LAN_S["lan-server.mjs"] --> LAN
 - 自动保存防抖：500ms 防抖减少频繁写盘，提高响应性。
 - 索引优化：为 assets.kind、projects.updatedAt 等高频查询字段建立索引，提升检索性能。
 - 垃圾回收周期：合理设置保留期（默认 24 小时），平衡空间占用与误删风险。
-
-[本节为通用性能建议，不直接分析具体文件]
+- **新增** 上传进度节流：120ms 节流间隔避免频繁重渲染，提升界面响应性。
+- **新增** 状态修复机制：应用启动时快速修复卡住的上传状态，避免用户困惑。
 
 ## 故障排查指南
-- 资源不存在错误：当本地无资源且云端/局域网均不可用时，会抛出“资源不存在”错误。检查网络、局域网在线状态与云端配置。
+- 资源不存在错误：当本地无资源且云端/局域网均不可用时，会抛出"资源不存在"错误。检查网络、局域网在线状态与云端配置。
 - 封面抓取失败：跨域或代理可能导致视频画面无法读取，需确保服务器返回正确的 CORS 头；必要时回退到全量下载再抓帧。
 - 保存失败：自动保存失败时会提示错误，检查 IndexedDB 配额与浏览器策略；确认局域网/云端同步是否正常。
 - 孤立资源未清理：确认 gcAssets 是否被调度执行；检查项目引用是否正确（assetId/coverAssetId）。
+- **新增** 上传失败问题：检查 cloudStatus 字段状态，确认 OSS 配置和登录状态；查看控制台日志了解具体错误原因。
+- **新增** 上传中断恢复：应用启动时会自动修复卡住的 uploading 状态为 failed，用户可点击重试。
 
-章节来源
+**章节来源**
 - [src/media/blobRegistry.ts:108-126](file://src/media/blobRegistry.ts#L108-L126)
 - [src/media/blobRegistry.ts:310-379](file://src/media/blobRegistry.ts#L310-L379)
 - [src/store/projectStore.ts:196-228](file://src/store/projectStore.ts#L196-L228)
 - [src/db/db.ts:46-68](file://src/db/db.ts#L46-L68)
+- [src/store/uploadStore.ts:77-84](file://src/store/uploadStore.ts#L77-L84)
 
 ## 结论
-本项目以 Dexie 为核心构建 IndexedDB 存储层，结合云端与局域网实现高性能、低延迟的媒体管理与离线可用。通过清晰的表结构、完善的垃圾回收机制与稳健的降级策略，保障了在大文件与多端协同场景下的稳定性与用户体验。建议在后续迭代中继续优化索引、缓存策略与 GC 周期，进一步提升性能与可靠性。
-
-[本节为总结性内容，不直接分析具体文件]
+本项目以 Dexie 为核心构建 IndexedDB 存储层，结合云端与局域网实现高性能、低延迟的媒体管理与离线可用。通过清晰的表结构、完善的垃圾回收机制、稳健的降级策略以及**新增的云端上传状态管理功能**，保障了在大文件与多端协同场景下的稳定性与用户体验。云端上传状态管理确保了上传过程的可恢复性和用户界面的直观性，使应用程序能够在网络中断、页面刷新等异常情况下保持良好的用户体验。建议在后续迭代中继续优化索引、缓存策略与 GC 周期，进一步提升性能与可靠性。
 
 ## 附录：增删改查示例路径
 以下为常见操作的代码片段路径，便于快速定位实现细节：
@@ -358,8 +465,11 @@ LAN_S["lan-server.mjs"] --> LAN
 - 更新资产（文本素材写入）：[src/io/fileLoader.ts:121-135](file://src/io/fileLoader.ts#L121-L135)
 - 删除资产（垃圾回收）：[src/db/db.ts:46-68](file://src/db/db.ts#L46-L68)
 - 导出资产（打包 ZIP）：[src/io/importExport.ts:44-78](file://src/io/importExport.ts#L44-L78)
+- **新增** 云端上传（带状态管理）：[src/store/uploadStore.ts:27-74](file://src/store/uploadStore.ts#L27-L74)
+- **新增** 上传状态修复：[src/store/uploadStore.ts:77-84](file://src/store/uploadStore.ts#L77-L84)
+- **新增** 上传环境检查：[src/sync/assetCloudUpload.ts:6-8](file://src/sync/assetCloudUpload.ts#L6-L8)
 
-章节来源
+**章节来源**
 - [src/store/projectStore.ts:119-228](file://src/store/projectStore.ts#L119-L228)
 - [src/sync/lanClient.ts:494-500](file://src/sync/lanClient.ts#L494-L500)
 - [src/sync/lanClient.ts:1156-1169](file://src/sync/lanClient.ts#L1156-L1169)
@@ -367,3 +477,5 @@ LAN_S["lan-server.mjs"] --> LAN
 - [src/io/fileLoader.ts:121-135](file://src/io/fileLoader.ts#L121-L135)
 - [src/db/db.ts:46-68](file://src/db/db.ts#L46-L68)
 - [src/io/importExport.ts:44-78](file://src/io/importExport.ts#L44-L78)
+- [src/store/uploadStore.ts:27-84](file://src/store/uploadStore.ts#L27-L84)
+- [src/sync/assetCloudUpload.ts:6-8](file://src/sync/assetCloudUpload.ts#L6-L8)

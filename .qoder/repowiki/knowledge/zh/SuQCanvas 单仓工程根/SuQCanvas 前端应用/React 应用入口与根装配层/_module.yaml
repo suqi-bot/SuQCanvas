@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: frontend_app/app_entry
-title: 应用入口与全局类型定义
+title: React 应用入口与根装配层
 scope:
     - src/App.tsx
     - src/main.tsx

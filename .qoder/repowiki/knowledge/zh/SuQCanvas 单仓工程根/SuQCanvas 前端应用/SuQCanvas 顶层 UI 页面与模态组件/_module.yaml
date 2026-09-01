@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: frontend_app/ui_pages
-title: 应用主界面与视图组件
+title: SuQCanvas 顶层 UI 页面与模态组件
 scope:
     - src/components/AuthPage.tsx
     - src/components/HomePage.tsx
