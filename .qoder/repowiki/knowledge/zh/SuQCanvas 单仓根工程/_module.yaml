@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: ""
-title: SuQCanvas 单仓工程根
+title: SuQCanvas 单仓根工程
 scope:
     - README.md
     - .gitignore

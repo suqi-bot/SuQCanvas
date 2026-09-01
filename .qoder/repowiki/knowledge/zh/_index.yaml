@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: master
 nodes_managed: true
-exported_at: "2026-09-01T10:42:26Z"
+exported_at: "2026-09-01T14:33:50Z"
 modules:
     "":
-        dir_name: SuQCanvas 单仓工程根
-        title: SuQCanvas 单仓工程根
+        dir_name: SuQCanvas 单仓根工程
+        title: SuQCanvas 单仓根工程
         scope:
             - README.md
             - .gitignore
@@ -43,8 +43,8 @@ modules:
             - path: frontend_app/ui_pages
             - path: promo_assets
     frontend_app:
-        dir_name: SuQCanvas 前端应用
-        title: SuQCanvas 前端应用
+        dir_name: SuQCanvas 前端应用装配层
+        title: SuQCanvas 前端应用装配层
         scope:
             - src/
         source_files: []
@@ -56,8 +56,8 @@ modules:
         related_to:
             - path: build_scripts
     frontend_app/app_entry:
-        dir_name: React 应用入口与根装配层
-        title: React 应用入口与根装配层
+        dir_name: 应用启动入口与全局装配层
+        title: 应用启动入口与全局装配层
         scope:
             - src/App.tsx
             - src/main.tsx

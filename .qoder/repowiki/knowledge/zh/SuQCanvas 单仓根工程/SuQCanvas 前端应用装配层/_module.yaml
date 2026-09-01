@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: frontend_app
-title: SuQCanvas 前端应用
+title: SuQCanvas 前端应用装配层
 scope:
     - src/
 source_files: []
