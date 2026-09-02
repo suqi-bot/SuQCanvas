@@ -31,7 +31,15 @@ import type { HeadingLevel, ShapeType, StickyColor, SuqNode } from '../types'
 import { DEFAULT_EDGE_STYLE } from '../types'
 import { mediaNodeTypes } from './nodes/nodeTypes'
 import { styledEdgeTypes } from './edges/edgeTypes'
+import { AlignmentGuides } from './alignment/AlignmentGuides'
+import {
+  computeAlignment,
+  DEFAULT_SNAP_THRESHOLD_PX,
+  getNodeBounds,
+} from './alignment/alignGuides'
+import { useAlignmentGuideStore } from './alignment/alignmentGuideStore'
 import { InspectorPanel } from '../components/InspectorPanel'
+import { GroupToolbar } from '../components/GroupToolbar'
 import { isNodeLockedByOther, sendLanCursor, setLanEditing, clearLanEditing } from '../sync/lanClient'
 import { writeSelectionToSystemClipboard } from './clipboard'
 
@@ -76,9 +84,47 @@ function BoardInner() {
   const onNodeDragStart = useCallback<OnNodeDrag<SuqNode>>((_event, node) => {
     if (isNodeLockedByOther(node.id)) return
     setLanEditing(node.id, node.data?.label ?? '元素')
+    // 拖动开始即清空上一轮残留的参考线。
+    useAlignmentGuideStore.getState().clear()
   }, [])
+  const onNodeDrag = useCallback<OnNodeDrag<SuqNode>>((_event, _node, draggedNodes) => {
+    const guideStore = useAlignmentGuideStore.getState()
+    // 读取最新开关状态（避免闭包陈旧），关闭时直接清空参考线。
+    if (!useSettingsStore.getState().showAlignmentGuides) {
+      guideStore.clear()
+      return
+    }
+    if (draggedNodes.length === 0) {
+      guideStore.clear()
+      return
+    }
+    const allNodes = useCanvasStore.getState().nodes
+    const draggedIds = new Set(draggedNodes.map((n) => n.id))
+    const draggedBounds = allNodes.filter((n) => draggedIds.has(n.id)).map(getNodeBounds)
+    const otherBounds = allNodes.filter((n) => !draggedIds.has(n.id)).map(getNodeBounds)
+    // 阈值按当前缩放换算到画布坐标：屏幕阈值 / zoom。
+    const zoom = getZoom() > 0 ? getZoom() : 1
+    const threshold = DEFAULT_SNAP_THRESHOLD_PX / zoom
+    const { deltaX, deltaY, guides } = computeAlignment(draggedBounds, otherBounds, threshold)
+    guideStore.setGuides(guides)
+    if (deltaX !== 0 || deltaY !== 0) {
+      // 将统一偏移施加到所有被拖节点（保持相对位置），通过受控 store 更新位置。
+      useCanvasStore.getState().onNodesChange(
+        allNodes
+          .filter((n) => draggedIds.has(n.id))
+          .map((n) => ({
+            id: n.id,
+            type: 'position' as const,
+            position: { x: n.position.x + deltaX, y: n.position.y + deltaY },
+            dragging: true,
+          })),
+      )
+    }
+  }, [getZoom])
   const onNodeDragStop = useCallback<OnNodeDrag<SuqNode>>(() => {
     clearLanEditing()
+    // 拖动结束清除参考线。
+    useAlignmentGuideStore.getState().clear()
   }, [])
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     const p = screenToFlowPosition({ x: e.clientX, y: e.clientY })
@@ -343,6 +389,7 @@ function BoardInner() {
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       onNodeDragStart={onNodeDragStart}
+      onNodeDrag={onNodeDrag}
       onNodeDragStop={onNodeDragStop}
       isValidConnection={(c) => c.source !== c.target}
       deleteKeyCode={['Backspace', 'Delete']}
@@ -392,6 +439,8 @@ className={`${dragging ? 'sq-drag-active' : ''} ${
         maskColor={isLight ? 'rgba(241, 245, 249, 0.72)' : 'rgba(2, 6, 23, 0.7)'}
         bgColor={isLight ? '#f8fafc' : '#0f172a'}
       />
+      <AlignmentGuides />
+      <GroupToolbar />
       {Object.values(cursors).filter((c) => c.userId !== selfId).map((cursor) => {
         const p = flowToScreenPosition({ x: cursor.x, y: cursor.y })
         return (

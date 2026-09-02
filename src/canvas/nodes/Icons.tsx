@@ -648,6 +648,26 @@ export function PiPIcon(props: IconProps) {
   )
 }
 
+export function AlignGuidesIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <rect x="8" y="8" width="8" height="8" rx="1.5" />
+      <path d="M12 3v18" strokeDasharray="2.5 2.5" />
+      <path d="M3 12h18" strokeDasharray="2.5 2.5" />
+    </Base>
+  )
+}
+
+export function LockIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+      <path d="M12 15v2" />
+    </Base>
+  )
+}
+
 export function KindIcon({ kind, ...props }: IconProps & { kind: MediaKind }) {
   switch (kind) {
     case 'image':

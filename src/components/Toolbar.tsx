@@ -14,6 +14,7 @@ import {
   AlignBottomIcon,
   AlignCenterHIcon,
   AlignCenterVIcon,
+  AlignGuidesIcon,
   AlignLeftIcon,
   AlignRightIcon,
   AlignTopIcon,
@@ -111,6 +112,8 @@ export function Toolbar() {
   const saveStatus = useProjectStore((s) => s.saveStatus)
   const theme = useSettingsStore((s) => s.theme)
   const toggleTheme = useSettingsStore((s) => s.toggleTheme)
+  const showAlignmentGuides = useSettingsStore((s) => s.showAlignmentGuides)
+  const setShowAlignmentGuides = useSettingsStore((s) => s.setShowAlignmentGuides)
   const zoom = useCanvasStore((s) => s.viewport.zoom)
   const canUndo = useCanvasStore((s) => s.past.length > 0)
   const canRedo = useCanvasStore((s) => s.future.length > 0)
@@ -369,6 +372,19 @@ export function Toolbar() {
           <FitIcon />
         </button>
       </div>
+
+      <button
+        type="button"
+        onClick={() => setShowAlignmentGuides(!showAlignmentGuides)}
+        title={showAlignmentGuides ? '对齐参考线：开（拖动节点时智能吸附）' : '对齐参考线：关'}
+        className={`shrink-0 rounded-md border p-1.5 transition-colors ${
+          showAlignmentGuides
+            ? 'border-sky-500/60 text-sky-400 hover:bg-hover'
+            : 'border-edge2 text-mid hover:bg-hover hover:text-main'
+        }`}
+      >
+        <AlignGuidesIcon className="text-base" />
+      </button>
 
       <button
         type="button"
