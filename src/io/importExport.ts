@@ -2,6 +2,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import type { Viewport } from '@xyflow/react'
 import { genUuid } from '../utils/uuid'
 import { db } from '../db/db'
+import { normalizeGroupHierarchy } from '../canvas/groups'
 import { useCanvasStore } from '../store/canvasStore'
 import { useProjectStore } from '../store/projectStore'
 import { useAuthStore } from '../store/authStore'
@@ -150,12 +151,15 @@ export async function importProjectFile(file: File): Promise<void> {
   const now = Date.now()
   const id = genUuid()
   const projectName = json.project?.name || '导入的项目'
+  // 导入归一化：父节点先于子节点排序，并把 parentId 指向缺失节点的“孤儿”降级为顶层，
+  // 完整重建分组嵌套结构（无 schema 变更，VERSION 维持 1）。
+  const normalizedNodes = normalizeGroupHierarchy(json.nodes ?? [])
   const record = {
     id,
     name: projectName,
     createdAt: now,
     updatedAt: now,
-    graph: { nodes: json.nodes ?? [], edges: json.edges ?? [] },
+    graph: { nodes: normalizedNodes, edges: json.edges ?? [] },
     viewport: json.viewport ?? { x: 0, y: 0, zoom: 1 },
   }
 

@@ -145,3 +145,83 @@ describe('资源删除', () => {
     expect(useCanvasStore.getState().edges.map((item) => item.id)).toEqual(['keep-edge'])
   })
 })
+
+describe('分组/容器（node_grouping）', () => {
+  function select(...ids: string[]) {
+    useCanvasStore.setState({
+      nodes: useCanvasStore.getState().nodes.map((n) => ({ ...n, selected: ids.includes(n.id) })),
+    })
+  }
+
+  it('groupSelected 把多选节点成组并转为相对坐标', () => {
+    useCanvasStore.getState().addNodes([
+      { ...node('a'), position: { x: 10, y: 10 } },
+      { ...node('b'), position: { x: 200, y: 120 } },
+    ])
+    select('a', 'b')
+    useCanvasStore.getState().groupSelected()
+
+    const state = useCanvasStore.getState()
+    const group = state.nodes.find((n) => n.data.isGroup)
+    expect(group).toBeDefined()
+    expect(group!.type).toBe('group')
+    const children = state.nodes.filter((n) => n.parentId === group!.id)
+    expect(children).toHaveLength(2)
+    for (const c of children) {
+      expect(c.extent).toBe('parent')
+      expect(c.position.x).toBeGreaterThanOrEqual(0)
+      expect(c.position.y).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it('dissolveGroup 解散后移除分组节点并保留成员', () => {
+    useCanvasStore.getState().addNodes([
+      { ...node('a'), position: { x: 10, y: 10 } },
+      { ...node('b'), position: { x: 200, y: 120 } },
+    ])
+    select('a', 'b')
+    useCanvasStore.getState().groupSelected()
+    const groupId = useCanvasStore.getState().nodes.find((n) => n.data.isGroup)!.id
+    useCanvasStore.getState().dissolveGroup(groupId)
+
+    const state = useCanvasStore.getState()
+    expect(state.nodes.find((n) => n.data.isGroup)).toBeUndefined()
+    expect(state.nodes).toHaveLength(2)
+    expect(state.nodes.every((n) => !n.data.isGroup)).toBe(true)
+  })
+
+  it('删除分组节点会连带删除其子孙与连线', () => {
+    useCanvasStore.getState().addNodes([
+      { ...node('a'), position: { x: 10, y: 10 } },
+      { ...node('b'), position: { x: 200, y: 120 } },
+    ])
+    select('a', 'b')
+    useCanvasStore.getState().groupSelected()
+    const state0 = useCanvasStore.getState()
+    const groupId = state0.nodes.find((n) => n.data.isGroup)!.id
+    const childId = state0.nodes.find((n) => n.parentId === groupId)!.id
+    useCanvasStore.setState({
+      edges: [
+        { id: 'e', source: childId, target: 'ghost', type: 'styled', data: { style: { lineStyle: 'solid', pathType: 'bezier', arrow: 'end', stroke: '#000', strokeWidth: 1 } } },
+      ],
+    })
+    // 模拟按下 Delete：ReactFlow 派发 remove change 给父节点
+    useCanvasStore.getState().onNodesChange([{ id: groupId, type: 'remove' }])
+    const state = useCanvasStore.getState()
+    expect(state.nodes.find((n) => n.data.isGroup)).toBeUndefined()
+    expect(state.nodes.find((n) => n.parentId === groupId)).toBeUndefined()
+    expect(state.edges).toHaveLength(0)
+  })
+
+  it('setNodeLocked 写入 locked 并置 draggable=false', () => {
+    useCanvasStore.getState().addNodes([node('a')])
+    useCanvasStore.getState().setNodeLocked('a', true)
+    const n = useCanvasStore.getState().nodes.find((x) => x.id === 'a')!
+    expect(n.data.locked).toBe(true)
+    expect(n.draggable).toBe(false)
+    useCanvasStore.getState().setNodeLocked('a', false)
+    const n2 = useCanvasStore.getState().nodes.find((x) => x.id === 'a')!
+    expect(n2.data.locked).toBe(false)
+    expect(n2.draggable).toBe(true)
+  })
+})

@@ -95,6 +95,17 @@ export interface SuqNodeData extends Record<string, unknown> {
   assetUpdatedAt?: number
   /** 音乐节点显式设置的专辑图素材 id */
   coverAssetId?: string
+  // —— 分组/容器字段（本期范围，均为可选附加字段，零 schema 变更）——
+  /** 分组容器：true 表示这是一个分组节点（React Flow 原生 group node） */
+  isGroup?: boolean
+  /** 分组命名（P0，用户决策并入）：仅附加字段，不改存储结构 */
+  groupName?: string
+  /** 分组锁定（本期交付，默认 false）：锁定后分组不可拖动/缩放 */
+  locked?: boolean
+  /** P1 预留：分组背景色/边框色 */
+  groupColor?: string
+  /** P1 预留：分组内边距，默认 24 */
+  groupPadding?: number
 }
 
 export interface SuqEdgeData extends Record<string, unknown> {

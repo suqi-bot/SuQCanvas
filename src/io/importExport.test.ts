@@ -126,4 +126,56 @@ describe('导出/导入往返', () => {
     await importProjectFile(file)
     expect(await db.assets.count()).toBe(0)
   })
+
+  it('分组结构导出后导入完整还原（parentId/extent/isGroup 与命名）', async () => {
+    const groupNode: SuqNode = {
+      id: 'g1',
+      type: 'group',
+      position: { x: 0, y: 0 },
+      style: { width: 400, height: 300 },
+      zIndex: 0,
+      // kind 仅为满足类型约束，对分组节点无意义
+      data: { kind: 'text', isGroup: true, groupName: '分组A', label: '分组A' },
+    }
+    const childA: SuqNode = {
+      id: 'c1',
+      type: 'text',
+      parentId: 'g1',
+      extent: 'parent',
+      position: { x: 20, y: 30 },
+      style: { width: 160 },
+      data: { kind: 'text', label: 'A', text: 'A', borderColor: '#64748b' },
+    }
+    const childB: SuqNode = {
+      id: 'c2',
+      type: 'text',
+      parentId: 'g1',
+      extent: 'parent',
+      position: { x: 220, y: 180 },
+      style: { width: 160 },
+      data: { kind: 'text', label: 'B', text: 'B', borderColor: '#64748b' },
+    }
+    const nodes = [groupNode, childA, childB]
+    const edges: SuqEdge[] = []
+    const blob = await exportProjectToBlob('分组项目', nodes, edges, { x: 0, y: 0, zoom: 1 })
+    const file = new File([blob], 'group.sqcanvas')
+    await importProjectFile(file)
+
+    const canvas = useCanvasStore.getState()
+    expect(canvas.nodes).toHaveLength(3)
+
+    const g = canvas.nodes.find((n) => n.id === 'g1')
+    expect(g?.data.isGroup).toBe(true)
+    expect(g?.data.groupName).toBe('分组A')
+    expect(g?.type).toBe('group')
+
+    const a = canvas.nodes.find((n) => n.id === 'c1')
+    expect(a?.parentId).toBe('g1')
+    expect(a?.extent).toBe('parent')
+
+    // 导入归一化后父节点应排在子节点之前
+    const order = canvas.nodes.map((n) => n.id)
+    expect(order.indexOf('g1')).toBeLessThan(order.indexOf('c1'))
+    expect(order.indexOf('g1')).toBeLessThan(order.indexOf('c2'))
+  })
 })

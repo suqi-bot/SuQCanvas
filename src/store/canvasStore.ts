@@ -1,8 +1,24 @@
-import type { Connection, EdgeChange, NodeChange, Viewport } from '@xyflow/react'
+import type {
+  Connection,
+  EdgeChange,
+  NodeChange,
+  NodeDimensionChange,
+  Viewport,
+  XYPosition,
+} from '@xyflow/react'
 import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
 import { create } from 'zustand'
 import { DEFAULT_EDGE_STYLE, type SuqEdge, type SuqNode } from '../types'
+import {
+  clampChildrenToParent,
+  collectDescendantIds,
+  computeAbsolutePosition,
+  computeSelectionBoundingBox,
+  dissolveGroup as dissolveGroupNodes,
+  reparentToGroup,
+} from '../canvas/groups'
 import { useLanStore } from './lanStore'
+import { broadcastLock } from '../sync/lanClient'
 
 let idCounter = 0
 export function genId(prefix = 'n'): string {
@@ -51,6 +67,16 @@ interface CanvasState {
   setNodeZIndex: (id: string, zIndex: number) => void
   removeAssets: (assetIds: string[]) => void
   alignSelected: (mode: AlignMode) => void
+  /** 把当前多选（非分组）节点成组为一个 group 节点 */
+  groupSelected: () => void
+  /** 解散指定分组（成员归位到原父级/顶层，连线保留） */
+  dissolveGroup: (groupId: string) => void
+  /** 连同子孙一起删除分组（并删除相关连线） */
+  deleteGroupWithDescendants: (groupId: string) => void
+  /** 返回节点在画布中的绝对坐标 */
+  getAbsolutePosition: (id: string) => XYPosition
+  /** 锁定/解锁节点（本期用于分组，默认 false），并广播局域网 */
+  setNodeLocked: (id: string, locked: boolean) => void
   undo: () => void
   redo: () => void
   clearHistory: () => void
@@ -125,13 +151,53 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   onNodesChange: (changes) => {
     const s = get()
-    if (changes.some((c) => c.type === 'remove')) {
+    let expanded = changes
+    // 分组节点被删除时，连带移除其全部子孙（避免孤儿节点渲染异常）
+    const removes = changes.filter((c) => c.type === 'remove')
+    if (removes.length > 0) {
+      const groupIds = removes
+        .map((c) => c.id)
+        .filter((id) => s.nodes.find((n) => n.id === id && n.data.isGroup))
+      if (groupIds.length > 0) {
+        const removed = new Set(groupIds)
+        for (const gid of groupIds) {
+          for (const d of collectDescendantIds(gid, s.nodes)) removed.add(d)
+        }
+        const already = new Set(removes.map((c) => c.id))
+        const extra = [...removed]
+          .filter((id) => !already.has(id))
+          .map((id) => ({ id, type: 'remove' as const }))
+        if (extra.length > 0) expanded = [...changes, ...extra]
+      }
+    }
+    // 分组缩放（用户拖拽手柄 setAttributes）后，将 extent:'parent' 子节点约束在父框内，避免溢出
+    const groupDimChanges = expanded.filter(
+      (c): c is NodeDimensionChange =>
+        c.type === 'dimensions' &&
+        c.setAttributes === true &&
+        c.dimensions != null &&
+        s.nodes.some((n) => n.id === c.id && n.data.isGroup),
+    )
+    let nodes = applyNodeChanges(expanded, s.nodes)
+    for (const gc of groupDimChanges) {
+      const dims = gc.dimensions
+      if (!dims) continue
+      nodes = clampChildrenToParent(gc.id, { w: dims.width, h: dims.height }, nodes)
+    }
+    let edges = s.edges
+    const removedAny = expanded.some((c) => c.type === 'remove')
+    // 移除分组子孙时同步清理相关连线（连线随节点删除而清理）
+    if (removedAny) {
+      const removedIds = new Set(expanded.filter((c) => c.type === 'remove').map((c) => c.id))
+      edges = edges.filter((e) => !removedIds.has(e.source) && !removedIds.has(e.target))
+    }
+    if (removedAny) {
       flushPending(get)
       snapshotNow(set, get)
     } else {
       scheduleSnapshot(get)
     }
-    set({ nodes: applyNodeChanges(changes, s.nodes) })
+    set({ nodes, edges })
   },
   onEdgesChange: (changes) => {
     const s = get()
@@ -394,5 +460,87 @@ duplicateNode: (id) => {
   },
   reset: () => {
     set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, clipboard: null })
+  },
+  groupSelected: () => {
+    const nodes = get().nodes
+    const selected = nodes.filter((n) => n.selected && !n.data.isGroup)
+    if (selected.length < 2) return
+    const byId = new Map(nodes.map((n) => [n.id, n]))
+    const box = computeSelectionBoundingBox(
+      selected.map((n) => n.id),
+      nodes,
+    )
+    // 选中节点若同属一个父级，则新分组也嵌套在该父级下；否则为顶层分组
+    const parentIds = new Set(selected.map((n) => n.parentId))
+    const commonParent = parentIds.size === 1 ? [...parentIds][0] : undefined
+    const groupId = genId('group')
+    const parentAbs = commonParent ? computeAbsolutePosition(byId.get(commonParent)!, byId) : null
+    const groupNode: SuqNode = {
+      id: groupId,
+      type: 'group',
+      position:
+        commonParent && parentAbs
+          ? { x: box.x - parentAbs.x, y: box.y - parentAbs.y }
+          : { x: box.x, y: box.y },
+      ...(commonParent ? { parentId: commonParent, extent: 'parent' as const } : {}),
+      style: { width: Math.max(1, box.w), height: Math.max(1, box.h) },
+      zIndex: 0,
+      // kind 对分组节点无意义，仅为满足 SuqNodeData 必填约束；GroupNode 由 type 驱动渲染
+      data: { kind: 'text', isGroup: true, groupName: '分组', label: '分组' },
+      selected: true,
+    }
+    const groupAbsPos: XYPosition = commonParent && parentAbs ? parentAbs : { x: box.x, y: box.y }
+    // 传入完整 nodes 作为 allNodes：被重挂节点若存在祖先（嵌套分组），
+    // computeAbsolutePosition 需沿祖先链算出其真实绝对坐标，避免嵌套成组位移错位
+    const reparented = reparentToGroup(selected, groupId, groupAbsPos, nodes)
+    const selectedIds = new Set(selected.map((n) => n.id))
+    snapshotNow(set, get)
+    // 用重挂后的子节点替换原选中节点（避免重复），再追加分组节点
+    set({ nodes: [...nodes.filter((n) => !selectedIds.has(n.id)), groupNode, ...reparented] })
+  },
+  dissolveGroup: (groupId) => {
+    const nodes = get().nodes
+    const group = nodes.find((n) => n.id === groupId)
+    if (!group || !group.data.isGroup) return
+    const reparented = dissolveGroupNodes(group, group.parentId, nodes)
+    snapshotNow(set, get)
+    // 移除分组节点本身；直接子节点已重指父级，更深层后代保持不变，连线不动
+    set({ nodes: reparented.filter((n) => n.id !== groupId) })
+  },
+  deleteGroupWithDescendants: (groupId) => {
+    const nodes = get().nodes
+    const group = nodes.find((n) => n.id === groupId)
+    if (!group) return
+    const removeIds = new Set<string>([groupId, ...collectDescendantIds(groupId, nodes)])
+    const allEdges = get().edges
+    snapshotNow(set, get)
+    set({
+      nodes: nodes.filter((n) => !removeIds.has(n.id)),
+      edges: allEdges.filter(
+        (e) => !removeIds.has(e.source) && !removeIds.has(e.target),
+      ),
+    })
+  },
+  getAbsolutePosition: (id) => {
+    const nodes = get().nodes
+    const node = nodes.find((n) => n.id === id)
+    if (!node) return { x: 0, y: 0 }
+    return computeAbsolutePosition(node, new Map(nodes.map((n) => [n.id, n])))
+  },
+  setNodeLocked: (id, locked) => {
+    const exists = get().nodes.some((n) => n.id === id)
+    if (!exists) return
+    snapshotNow(set, get)
+    set({
+      nodes: get().nodes.map((n) =>
+        n.id === id ? { ...n, data: { ...n.data, locked }, draggable: !locked } : n,
+      ),
+    })
+    // 广播锁定状态给局域网协作者（离线/未连接时无副作用）
+    try {
+      broadcastLock(id, locked)
+    } catch {
+      // 忽略广播异常
+    }
   },
 }))

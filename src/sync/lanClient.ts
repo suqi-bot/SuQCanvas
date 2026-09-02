@@ -612,6 +612,10 @@ function handleMessage(msg: LanMessage): void {
       if (msg.active === false) lan.clearEditing(String(msg.from ?? ''))
       else lan.setEditing({ userId: String(msg.from ?? ''), name: String(msg.name ?? '协作者'), color: getLanUserColor(String(msg.from ?? ''), msg.color), nodeId: String(msg.nodeId ?? ''), label: String(msg.label ?? '节点'), updatedAt: Number(msg.updatedAt) || Date.now() })
       break
+    case 'lock':
+      if (msg.from === lan.selfId || msg.projectId !== lan.activeProjectId) return
+      emitLockChange(String(msg.nodeId ?? ''), msg.locked === true)
+      break
     case 'activity':
       if (msg.from === lan.selfId || msg.projectId !== lan.activeProjectId) return
       lan.addActivity({ id: String(msg.id ?? `${msg.from}-${Date.now()}`), userId: String(msg.from ?? ''), name: String(msg.name ?? '协作者'), color: getLanUserColor(String(msg.from ?? ''), msg.color), kind: (msg.kind as LanActivityKind) || 'change', message: String(msg.message ?? ''), nodeId: msg.nodeId ? String(msg.nodeId) : undefined, createdAt: Number(msg.createdAt) || Date.now() })
@@ -804,6 +808,28 @@ export function isNodeLockedByOther(nodeId: string): boolean {
   return Object.values(useLanStore.getState().editing).some(
     (item) => item.nodeId === nodeId && item.userId !== selfId,
   )
+}
+
+// ---------- 分组锁定广播（复用 editing 通道语义，独立 'lock' 消息） ----------
+type LockListener = (nodeId: string, locked: boolean) => void
+const lockListeners = new Set<LockListener>()
+
+/** 广播某个节点的锁定状态变更给局域网协作者（离线/未连接时直接返回） */
+export function broadcastLock(nodeId: string, locked: boolean): void {
+  if (!isLanConnected() || !useLanStore.getState().activeProjectId) return
+  roomSend('lock', { nodeId, locked })
+}
+
+/** 订阅局域网锁定状态变更；返回取消订阅函数 */
+export function onLockChange(cb: LockListener): () => void {
+  lockListeners.add(cb)
+  return () => {
+    lockListeners.delete(cb)
+  }
+}
+
+function emitLockChange(nodeId: string, locked: boolean): void {
+  for (const cb of lockListeners) cb(nodeId, locked)
 }
 
 /** 将项目快照保存到运行中继服务的局域网主机。 */

@@ -33,10 +33,11 @@ import {
   TextAlignTopIcon,
   TrashIcon,
 } from '../canvas/nodes/Icons'
+import { GroupInspectorSection } from './GroupInspectorSection'
 
 const PRESET_COLORS = ['#64748b', '#38bdf8', '#34d399', '#fbbf24', '#f472b6', '#f87171', '#a78bfa', '#0f172a']
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="border-b border-edge px-3 py-3 last:border-b-0">
       <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-dim">
@@ -486,6 +487,11 @@ export function InspectorPanel() {
               <TrashIcon /> 删除
             </button>
           </div>
+          {selectedEditableNodes.length === 1 && firstNode.data.isGroup && (
+            <GroupInspectorSection node={firstNode} />
+          )}
+          {!(selectedEditableNodes.length === 1 && firstNode.data.isGroup) && (
+          <>
           <Section title="名称">
             <input
               value={firstNode.data.label ?? ''}
@@ -793,6 +799,8 @@ export function InspectorPanel() {
                 </div>
               </Section>
             </>
+          )}
+          </>          
           )}
         </>
       )}

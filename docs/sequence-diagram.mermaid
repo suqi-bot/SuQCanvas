@@ -1,0 +1,90 @@
+%% ============ 流程 1：框选/多选成组 ============
+sequenceDiagram
+    actor User
+    participant Board as CanvasBoard / GroupToolbar
+    participant Store as useCanvasStore
+    participant GU as GroupUtils
+    participant RF as ReactFlow
+
+    User->>Board: 框选 / Shift 多选 (>=2 个节点)
+    Board->>Store: nodes.filter(n => n.selected)
+    User->>Board: 点击浮动工具条「组合」
+    Board->>Store: groupSelected()
+    Store->>GU: computeSelectionBoundingBox(selectedIds)
+    GU-->>Store: box {x, y, w, h} (绝对坐标)
+    Store->>GU: 对每个选中节点 computeAbsolutePosition(node)
+    GU-->>Store: childAbs (绝对坐标，已解包旧 parent)
+    Store->>Store: 新建 group 节点<br/>type='group', parentId=选中节点共同父级(或 undefined),<br/>position=box.topLeft, style={width:w,height:h},<br/>zIndex=0, data.isGroup=true
+    Store->>GU: reparentToGroup(children, groupId, groupAbsPos)
+    GU-->>Store: children'(parentId=groupId, position=abs-groupAbs 相对坐标)
+    Store->>Store: setNodes([...nodes, group, ...children'])
+    Store->>RF: onNodesChange -> applyNodeChanges
+    RF-->>User: 组包络框显示，父节点可整体拖动
+
+%% ============ 流程 2：解散分组 ============
+sequenceDiagram
+    actor User
+    participant IP as InspectorPanel
+    participant Store as useCanvasStore
+    participant GU as GroupUtils
+
+    User->>IP: 选中分组节点 -> 点「解散分组」
+    IP->>Store: dissolveGroup(groupId)
+    Store->>GU: computeAbsolutePosition(group)
+    GU-->>Store: groupAbs (绝对坐标)
+    Store->>GU: getDirectChildIds(groupId) + computeAbsolutePosition(each child)
+    GU-->>Store: childAbsList
+    Store->>GU: dissolveGroup(group, newParentId=group.parentId)
+    GU-->>Store: children'(parentId=newParentId, position=相对新父的绝对偏移)
+    Note over GU: 更深层后代的 parentId/相对坐标不变，仅随上层重指父级而整体保留
+    Store->>Store: 删除 group 节点 + 写入 children'
+    Store->>Store: onNodesChange -> applyNodeChanges (remove + position)
+    Note over Store: 连线 edges 不触碰，端点按子节点新位置自动重算
+    Store-->>User: 成员归位到顶层/上层组，连线保留
+
+%% ============ 流程 3：分组整体移动 ============
+sequenceDiagram
+    actor User
+    participant RF as ReactFlow
+    participant Store as useCanvasStore
+
+    User->>RF: 拖动 group 父节点
+    RF->>RF: 内部按 parentId+extent 计算 children 跟随
+    RF->>Store: onNodesChange([{type:'position', id:group, position}])
+    Store->>Store: applyNodeChanges -> 更新 group.position
+    RF->>RF: 子节点渲染位置 = 父位置 + 相对位置 (自动)
+    RF->>RF: 重算所有连接子节点边的端点坐标
+    RF-->>User: 子节点 + 连线端点同步移动
+
+%% ============ 流程 4：分组整体缩放/改尺寸 ============
+sequenceDiagram
+    actor User
+    participant GN as GroupNode
+    participant Store as useCanvasStore
+    participant GU as GroupUtils
+    participant RF as ReactFlow
+
+    User->>GN: 拖动 resize 手柄 (四角)
+    GN->>GN: screenToFlowPosition 计算新 w/h (含 MIN 约束)
+    GN->>Store: onNodesChange([{type:'dimensions', id:group, dimensions:{w,h}}])
+    GN->>GU: clampChildrenToParent(groupId, {w,h})
+    GU-->>Store: children' 相对位置 clamp 到 [0,w]x[0,h]
+    Store->>Store: 写入 group.style + children'
+    RF-->>User: 外框更新，extent:'parent' 子节点被约束在范围内
+
+%% ============ 流程 5：.sqcanvas 导入重建嵌套 ============
+sequenceDiagram
+    actor User
+    participant IE as ImportExport
+    participant GU as GroupUtils
+    participant Store as useProjectStore/CanvasStore
+    participant RF as ReactFlow
+
+    User->>IE: importProjectFile(.sqcanvas)
+    IE->>IE: unzipSync + JSON.parse(project.json)
+    Note over IE: nodes 已含 parentId/extent/相对 position (导出时原样序列化)
+    IE->>GU: normalizeGroupHierarchy(json.nodes)
+    GU-->>IE: nodes'(父节点先于子节点排序, 相对坐标校验)
+    IE->>Store: loadProject(id) -> setState({nodes: nodes'})
+    Store->>RF: ReactFlow 按 parentId 重建嵌套层级
+    RF-->>User: 分组结构完整还原，连线随之重建

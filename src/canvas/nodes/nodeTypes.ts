@@ -1,6 +1,7 @@
 import type { NodeTypes } from '@xyflow/react'
 import { AudioNode } from './AudioNode'
 import { FileCardNode } from './FileCardNode'
+import { GroupNode } from './GroupNode'
 import { HeadingNode } from './HeadingNode'
 import { ImageNode } from './ImageNode'
 import { MarkdownNode } from './MarkdownNode'
@@ -23,4 +24,5 @@ export const mediaNodeTypes: NodeTypes = {
   heading: HeadingNode,
   sticky: StickyNode,
   shape: ShapeNode,
+  group: GroupNode,
 }

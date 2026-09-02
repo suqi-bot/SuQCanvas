@@ -1,0 +1,124 @@
+classDiagram
+    %% ============ 现有数据模型（扩展点） ============
+    class SuqNodeData {
+        &lt;&lt;existing&gt;&gt;
+        +kind: MediaKind
+        +label?: string
+        +assetId?: string
+        +borderColor?: string
+        +createdById?: string
+        +createdByName?: string
+        +createdAt?: number
+        %%% 分组字段（本期范围）
+        +isGroup?: boolean          %% P0：是否为分组容器
+        +groupName?: string         %% P0：分组命名（用户决策并入）
+        +locked?: boolean           %% 本期：分组锁定，默认 false（由 P2 提升）
+        +groupColor?: string        %% P1：背景色/边框（视排期，不强制 P0）
+        +groupPadding?: number      %% P1：包络内边距，默认 24
+        %%% groupCollapsed 本期不做（折叠/展开留后续迭代）
+    }
+
+    class SuqNode {
+        &lt;&lt;@xyflow/react Node&gt;&gt;
+        +id: string
+        +type: string
+        +position: XYPosition
+        +data: SuqNodeData
+        +width?: number
+        +height?: number
+        +style?: CSSProperties
+        +zIndex?: number
+        +selected?: boolean
+        +dragging?: boolean
+        %%% 分组关键字段（React Flow v12 原生支持）
+        +parentId?: string
+        +extent?: 'parent' | 'default'
+    }
+
+    SuqNodeData &lt;.. SuqNode : data
+
+    %% ============ 分组工具（纯函数，无状态） ============
+    class GroupUtils {
+        &lt;&lt;new: src/canvas/groups.ts&gt;&gt;
+        +computeAbsolutePosition(node, nodesById): XYPosition
+        +collectDescendantIds(groupId, nodes): string[]
+        +getDirectChildIds(parentId, nodes): string[]
+        +computeSelectionBoundingBox(ids, nodes): Box
+        +reparentToGroup(children, groupId, groupAbsPos): SuqNode[]
+        +dissolveGroup(group, newParentId, nodes): SuqNode[]
+        +clampChildrenToParent(groupId, size, nodes): SuqNode[]
+        +normalizeGroupHierarchy(nodes): SuqNode[]
+    }
+
+    %% ============ Store 动作（扩展点） ============
+    class CanvasStore {
+        &lt;&lt;existing zustand: src/store/canvasStore.ts&gt;&gt;
+        +nodes: SuqNode[]
+        +edges: SuqEdge[]
+        +onNodesChange(changes): void
+        +addNodes(nodes): void
+        %%% 新增分组动作（含锁定，由 P2 提升本期）
+        +groupSelected(): void
+        +dissolveGroup(groupId): void
+        +deleteGroupWithDescendants(groupId): void
+        +getAbsolutePosition(id): XYPosition
+        +setNodeLocked(id, locked): void
+    }
+
+    class LanClient {
+        &lt;&lt;existing: src/sync/lanClient.ts&gt;&gt;
+        +broadcastLock(nodeId, locked): void
+        +onLockChange(cb): void
+    }
+
+    %% ============ 视图组件 ============
+    class GroupNode {
+        &lt;&lt;new: src/canvas/nodes/GroupNode.tsx&gt;&gt;
+        +node: NodeProps
+        +render(): 背景框 + ResizeHandles + 标签
+        +onResize(): clamp children
+    }
+
+    class ResizeHandles {
+        &lt;&lt;existing: src/canvas/nodes/ResizeHandles.tsx&gt;&gt;
+        +nodeId: string
+        +onPointerDown(corner): void
+    }
+
+    class GroupToolbar {
+        &lt;&lt;new: src/components/GroupToolbar.tsx&gt;&gt;
+        +selectionBBox: Box
+        +onGroup(): void
+        +render(): 浮动“组合”按钮
+    }
+
+    class InspectorPanel {
+        &lt;&lt;existing: src/components/InspectorPanel.tsx&gt;&gt;
+        +renderGroupPanel(group): void
+        +renderDissolveButton(): void
+    }
+
+    class CanvasBoard {
+        &lt;&lt;existing: src/canvas/CanvasBoard.tsx&gt;&gt;
+        +onNodeContextMenu(menu): void
+        +挂载 GroupToolbar
+    }
+
+    class ImportExport {
+        &lt;&lt;existing: src/io/importExport.ts&gt;&gt;
+        +importProjectFile(): normalize
+        +exportProjectToBlob(): 直接序列化 nodes
+    }
+
+    %% ============ 关系 ============
+    CanvasStore ..&gt; GroupUtils : 调用
+    CanvasStore ..&gt; SuqNode : 读写
+    CanvasStore ..&gt; LanClient : setNodeLocked 广播锁定
+    GroupNode ..&gt; ResizeHandles : 组合复用
+    GroupNode ..&gt; GroupUtils : clampChildrenToParent
+    GroupToolbar ..&gt; CanvasStore : groupSelected()
+    InspectorPanel ..&gt; CanvasStore : dissolveGroup() / setNodeLocked()
+    CanvasBoard ..&gt; GroupToolbar : 挂载
+    CanvasBoard ..&gt; GroupNode : nodeTypes 注册
+    ImportExport ..&gt; GroupUtils : normalizeGroupHierarchy()
+    GroupNode --|&gt; SuqNode : 渲染 type='group'
