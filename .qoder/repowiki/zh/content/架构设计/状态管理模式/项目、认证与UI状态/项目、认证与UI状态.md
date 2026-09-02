@@ -17,6 +17,12 @@
 - [Toolbar.tsx](file://src/components/Toolbar.tsx)
 </cite>
 
+## 更新摘要
+**变更内容**
+- 更新了App组件中的entered状态判断逻辑，优化了应用启动流程
+- 改进了认证状态与项目初始化的依赖关系管理
+- 增强了用户登录态和游客模式的切换处理
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -79,7 +85,7 @@ CLOUD --> DB
 ```
 
 图表来源
-- [App.tsx:19-38](file://src/App.tsx#L19-L38)
+- [App.tsx:20-78](file://src/App.tsx#L20-L78)
 - [projectStore.ts:69-229](file://src/store/projectStore.ts#L69-L229)
 - [authStore.ts:44-103](file://src/store/authStore.ts#L44-L103)
 - [uiStore.ts:49-116](file://src/store/uiStore.ts#L49-L116)
@@ -91,7 +97,7 @@ CLOUD --> DB
 - [db.ts:25-33](file://src/db/db.ts#L25-L33)
 
 章节来源
-- [App.tsx:19-38](file://src/App.tsx#L19-L38)
+- [App.tsx:20-78](file://src/App.tsx#L20-L78)
 
 ## 核心组件
 - projectStore：负责项目生命周期（新建、加载、保存、重命名）、自动保存、云端/本地数据源选择、局域网协作加入。
@@ -110,6 +116,7 @@ CLOUD --> DB
 ## 架构总览
 整体状态流：
 - App 初始化 authStore，根据构建模式决定是否自动连接局域网；进入后打开首页并初始化项目。
+- **更新**：App 组件现在使用优化的 entered 状态判断逻辑，仅依赖布尔值避免重复渲染。
 - projectStore.init 读取项目列表（登录后仅云端，否则本地），加载最新或重置画布，安装自动保存订阅。
 - canvasStore 维护节点、边、视口与撤销历史，并在局域网模式下广播变更。
 - uiStore 驱动各类模态框与工具栏状态，供 Toolbar 等组件消费。
@@ -126,6 +133,7 @@ participant L as "lanClient.ts"
 participant U as "uiStore.ts"
 A->>S : init()
 S-->>A : 用户/游客状态
+Note over A : 计算 entered = Boolean(user || guest)
 A->>U : setHomeOpen(true)
 A->>P : init()
 P->>P : syncProjectList()
@@ -139,7 +147,7 @@ P->>L : joinLanProject(id)
 ```
 
 图表来源
-- [App.tsx:25-38](file://src/App.tsx#L25-L38)
+- [App.tsx:26-42](file://src/App.tsx#L26-L42)
 - [authStore.ts:49-82](file://src/store/authStore.ts#L49-L82)
 - [projectStore.ts:81-117](file://src/store/projectStore.ts#L81-L117)
 - [lanClient.ts:767-776](file://src/sync/lanClient.ts#L767-L776)
@@ -399,6 +407,7 @@ UI["uiStore.ts"] --> TOOLBAR["Toolbar.tsx"]
 - 局域网同步批量：lanClient 对删除操作与活动通知进行批处理与防抖，减少网络开销。
 - 播放器竞态保护：playerStore 使用序列号避免连续 play 导致的覆盖问题。
 - 歌单解析缓存：playlists 模块对整图解析结果进行引用级缓存，避免重复计算。
+- **更新**：App 组件使用布尔值依赖优化渲染，避免 Supabase token 刷新导致的重复执行。
 
 [本节为通用性能建议，不直接分析具体代码行]
 
@@ -415,6 +424,9 @@ UI["uiStore.ts"] --> TOOLBAR["Toolbar.tsx"]
 - 播放器无法播放
   - 资源 URL 获取失败或浏览器自动播放策略限制；可尝试手动点击播放。
   - 参考：[playerStore.ts:174-209](file://src/store/playerStore.ts#L174-L209)
+- **更新**：应用启动问题
+  - 检查 entered 状态计算逻辑，确保用户或游客状态正确设置。
+  - 参考：[App.tsx:36-42](file://src/App.tsx#L36-L42)
 
 章节来源
 - [authStore.ts:18-25](file://src/store/authStore.ts#L18-L25)
@@ -422,9 +434,10 @@ UI["uiStore.ts"] --> TOOLBAR["Toolbar.tsx"]
 - [lanClient.ts:19-45](file://src/sync/lanClient.ts#L19-L45)
 - [lanClient.ts:345-350](file://src/sync/lanClient.ts#L345-L350)
 - [playerStore.ts:174-209](file://src/store/playerStore.ts#L174-L209)
+- [App.tsx:36-42](file://src/App.tsx#L36-L42)
 
 ## 结论
-SuQCanvas 的状态管理以 Zustand 为核心，按职责清晰拆分，形成“认证→项目→画布→同步”的链路。projectStore 统一管理项目生命周期与自动保存；authStore 保证登录态与数据源隔离；uiStore 集中界面状态；settingsStore 提供持久化主题；playerStore 统一播放行为并与画布连线深度集成。该设计便于扩展与维护，适合团队协作与多端同步场景。
+SuQCanvas 的状态管理以 Zustand 为核心，按职责清晰拆分，形成"认证→项目→画布→同步"的链路。**更新后的 App 组件通过优化的 entered 状态判断逻辑，避免了因 Supabase token 刷新导致的重复渲染问题，提升了应用启动性能和用户体验**。projectStore 统一管理项目生命周期与自动保存；authStore 保证登录态与数据源隔离；uiStore 集中界面状态；settingsStore 提供持久化主题；playerStore 统一播放行为并与画布连线深度集成。该设计便于扩展与维护，适合团队协作与多端同步场景。
 
 [本节为总结性内容，不直接分析具体代码行]
 
@@ -546,3 +559,13 @@ SuQCanvas 的状态管理以 Zustand 为核心，按职责清晰拆分，形成�
 章节来源
 - [playerStore.ts:25-50](file://src/store/playerStore.ts#L25-L50)
 - [playerStore.ts:163-291](file://src/store/playerStore.ts#L163-L291)
+- [playlists.ts:71-112](file://src/media/playlists.ts#L71-L112)
+
+### App 组件集成示例
+- **更新**：优化的状态管理流程
+  - 初始化流程：useAuthStore.init() → 计算 entered 状态 → 条件初始化项目
+  - 依赖优化：仅依赖布尔值避免重复渲染
+  - 条件渲染：根据 loading、entered 状态显示不同界面
+
+章节来源
+- [App.tsx:20-78](file://src/App.tsx#L20-L78)
