@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { db, gcAssets } from '../db/db'
 import type { ProjectRecord } from '../db/db'
 import { useProjectStore } from '../store/projectStore'
@@ -10,7 +10,7 @@ import { useCanvasStore } from '../store/canvasStore'
 import { deleteProjectFromCloud, syncProjectList } from '../sync/cloudSync'
 import { isCloudConfigured } from '../sync/supabaseClient'
 import { isOssConfigured } from '../sync/ossClient'
-import { IS_ONLINE_BUILD } from '../buildMode'
+import { IS_ONLINE_BUILD, IS_DESKTOP_BUILD } from '../buildMode'
 import { useAuthStore } from '../store/authStore'
 import { useLanStore } from '../store/lanStore'
 import {
@@ -28,6 +28,12 @@ import type { Theme } from '../store/settingsStore'
 import { LanIcon, MoonIcon, PlusIcon, SunIcon } from '../canvas/nodes/Icons'
 import { getDeviceId } from '../utils/deviceId'
 import { APP_VERSION } from '../appVersion'
+import { syncLocalProjectToLan } from '../sync/localProjectSync'
+import DesktopCloudSaveButton from '../desktop/DesktopCloudSaveButton'
+import { downloadLanProject } from '../sync/downloadLanProject'
+import { LanPanel } from './LanPanel'
+
+const DesktopCloudPanel = lazy(() => import('../desktop/DesktopCloudPanel'))
 
 function fmtTime(ts: number): string {
   return new Date(ts).toLocaleString('zh-CN', {
@@ -433,6 +439,10 @@ export function HomePage() {
   const importRef = useRef<HTMLInputElement | null>(null)
   const remoteProjects = useLanStore((s) => s.remoteProjects)
   const lanName = useLanStore((s) => s.name)
+  const lanStatus = useLanStore((s) => s.status)
+  const syncProgress = useUiStore((s) => s.busyMessage)
+  const setSyncProgress = (busyMessage: string) => useUiStore.setState({ busyMessage })
+  const [desktopView, setDesktopView] = useState<'local' | 'server' | 'cloud'>('local')
   const [backups, setBackups] = useState<LanBackupMeta[] | null>(null)
 
   const refresh = useCallback(async () => {
@@ -449,12 +459,18 @@ export function HomePage() {
 
   const remoteIdSet = useMemo(() => new Set(remoteProjects.map((r) => r.id)), [remoteProjects])
 
-  const isSharedId = (id: string) => remoteIdSet.has(id)
+  const isSharedId = (id: string) => (!IS_DESKTOP_BUILD || desktopView === 'server') && remoteIdSet.has(id)
   const isRemoteOnlyId = (id: string) =>
-    isSharedId(id) && !projects.some((project) => project.id === id)
+    isSharedId(id) && (IS_DESKTOP_BUILD || !projects.some((project) => project.id === id))
 
   /** 展示列表 = 本地项目 + 局域网远端项目（本地没有的） */
   const visibleProjects = useMemo(() => {
+    if (IS_DESKTOP_BUILD) {
+      if (desktopView === 'local') return projects
+      return remoteProjects.map((project) => ({ ...project, createdAt: 0,
+        graph: { nodes: [], edges: [] }, viewport: { x: 0, y: 0, zoom: 1 },
+      })).sort((a, b) => b.updatedAt - a.updatedAt)
+    }
     const merged = [...projects]
     for (const r of remoteProjects) {
       const localIndex = merged.findIndex((project) => project.id === r.id)
@@ -476,13 +492,39 @@ export function HomePage() {
       }
     }
     return merged.sort((a, b) => b.updatedAt - a.updatedAt)
-  }, [projects, remoteProjects])
+  }, [projects, remoteProjects, desktopView])
 
   if (!open) return null
 
   const handleNew = async () => {
+    setDesktopView('local')
     await newProject('未命名项目')
     setOpen(false)
+  }
+
+  const handleSync = async (p: ProjectRecord) => {
+    if (busy) return
+    setBusy(true)
+    setSyncProgress('准备同步…')
+    try {
+      let project = await db.projects.get(p.id)
+      if (!project) throw new Error('本地项目不存在')
+      if (p.id === currentId) {
+        const { nodes, edges, viewport } = useCanvasStore.getState()
+        project = { ...project, name: useProjectStore.getState().projectName,
+          graph: { nodes, edges }, viewport, updatedAt: Date.now() }
+        await db.projects.put(project)
+      }
+      await syncLocalProjectToLan(project, setSyncProgress)
+      await broadcastLocalProjects()
+      await refresh()
+      toast(`「${p.name}」已同步到服务器`, 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '同步失败，请重试', 'error')
+    } finally {
+      setSyncProgress('')
+      setBusy(false)
+    }
   }
 
   const handleReturnToLanLogin = async () => {
@@ -498,6 +540,19 @@ export function HomePage() {
   }
 
   const handleOpen = async (p: ProjectRecord) => {
+    if (IS_DESKTOP_BUILD && desktopView === 'server') {
+      if (busy) return
+      setBusy(true)
+      try {
+        await downloadLanProject(p.id, setSyncProgress)
+        await refresh()
+        setDesktopView('local')
+        toast('已下载为独立本地副本，可离线编辑', 'success')
+      } catch (error) {
+        toast(error instanceof Error ? error.message : '下载失败', 'error')
+      } finally { setSyncProgress(''); setBusy(false) }
+      return
+    }
     let fetchedShared = false
     if (isSharedId(p.id)) {
       const rec = await fetchProjectFromLan(p.id)
@@ -523,7 +578,9 @@ export function HomePage() {
         return
       }
     }
-    if (!window.confirm(`确定删除项目「${p.name}」吗？删除后服务器将保留备份 24 小时。`)) return
+    if (!window.confirm(IS_DESKTOP_BUILD
+      ? `确定删除本地项目「${p.name}」吗？服务器副本不受影响，请先导出需要保留的内容。`
+      : `确定删除项目「${p.name}」吗？删除后服务器将保留备份 24 小时。`)) return
     setBusy(true)
     try {
       const authed = useAuthStore.getState().user !== null
@@ -602,7 +659,7 @@ export function HomePage() {
         blob = await exportProjectToBlob(p.name, p.graph.nodes, p.graph.edges, p.viewport)
       }
       const safeName = p.name.replace(/[\\/:*?"<>|]/g, '_')
-      downloadBlob(blob, `${safeName}.sqcanvas`)
+      if (!(await downloadBlob(blob, `${safeName}.sqcanvas`))) return
       toast(`「${p.name}」已导出`, 'success')
     } catch (err) {
       console.error(err)
@@ -658,7 +715,7 @@ export function HomePage() {
             </>
           ) : (
             <span className="rounded bg-violet-500/15 px-2 py-0.5 text-[11px] font-medium text-violet-400">
-              局域网版
+              {IS_DESKTOP_BUILD ? '桌面版 · 离线可用' : '局域网版'}
             </span>
           )}
           <div className="flex-1" />
@@ -679,12 +736,13 @@ export function HomePage() {
           ) : (
             <span
               className="max-w-40 truncate rounded bg-violet-500/15 px-2 py-1 text-xs text-violet-400"
-              title={`我的协作名称：${lanName || '未命名'}`}
+              title={IS_DESKTOP_BUILD ? '项目保存在此电脑' : `我的协作名称：${lanName || '未命名'}`}
             >
-              {lanName || '局域网协作'}
+              {IS_DESKTOP_BUILD ? '本地工作区' : lanName || '局域网协作'}
             </span>
           )}
-          {!IS_ONLINE_BUILD && (
+          {IS_DESKTOP_BUILD && <LanPanel />}
+          {!IS_ONLINE_BUILD && !IS_DESKTOP_BUILD && (
             <button
               type="button"
               onClick={() => void handleReturnToLanLogin()}
@@ -713,7 +771,7 @@ export function HomePage() {
           >
             导入 .sqcanvas
           </button>
-          {!IS_ONLINE_BUILD && (
+          {!IS_ONLINE_BUILD && !IS_DESKTOP_BUILD && (
             <button
               type="button"
               onClick={async () => {
@@ -808,9 +866,30 @@ export function HomePage() {
           </div>
         )}
 
+        {IS_DESKTOP_BUILD && (
+          <div className="mb-5 flex items-center gap-3 border-b border-edge pb-3">
+            {(['local', 'cloud', 'server'] as const).map((view) => (
+              <button key={view} type="button" onClick={() => setDesktopView(view)} disabled={busy}
+                className={`rounded-lg px-4 py-2 text-sm ${desktopView === view ? 'bg-sky-600 text-white' : 'text-soft hover:bg-hover'}`}>
+                {view === 'local' ? `本地项目（${projects.length}）` : view === 'cloud' ? '在线项目' : `局域网项目（${remoteProjects.length}）`}
+              </button>
+            ))}
+            <span className="ml-auto text-xs text-dim">
+              {desktopView === 'cloud' ? '连接原在线版账号' : desktopView === 'local' ? '保存在此电脑 · 手动上传服务器' : lanStatus === 'connected' ? '下载独立副本后离线编辑' : '点击右上角连接图标，填写服务器地址'}
+            </span>
+          </div>
+        )}
+        {IS_DESKTOP_BUILD && desktopView === 'cloud' ? (
+          <Suspense fallback={<div className="py-8 text-sm text-dim">正在打开在线项目…</div>}>
+            <DesktopCloudPanel onDownloaded={async () => { await refresh(); setDesktopView('local') }} />
+          </Suspense>
+        ) : <>
         <div className="mb-3 text-xs font-medium uppercase tracking-wider text-dim">
-          全部项目（{visibleProjects.length}）
+          {IS_DESKTOP_BUILD ? desktopView === 'local' ? '本地项目' : '服务器项目' : '全部项目'}（{visibleProjects.length}）
         </div>
+        {syncProgress && (
+          <div role="status" className="mb-3 text-sm text-sky-500">{syncProgress}</div>
+        )}
 
         {!initialized ? (
           <div className="rounded-2xl border border-edge bg-panel py-16 text-center text-sm text-dim">
@@ -818,7 +897,9 @@ export function HomePage() {
           </div>
         ) : visibleProjects.length === 0 ? (
           <div className="rounded-2xl border border-edge bg-panel py-16 text-center text-sm text-dim">
-            暂无项目，点击上方「新建项目」开始
+            {IS_DESKTOP_BUILD && desktopView === 'server'
+              ? lanStatus === 'connected' ? '服务器上暂无项目，可以从本地项目上传' : '尚未连接服务器，本地项目仍可离线使用'
+              : '暂无项目，点击上方「新建项目」开始'}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 pb-8 sm:grid-cols-2 lg:grid-cols-3">
@@ -834,10 +915,12 @@ export function HomePage() {
                   onClick={() => void handleOpen(p)}
                   disabled={busy}
                   className="relative h-36 w-full cursor-pointer bg-panel2/50 p-1.5 disabled:cursor-wait"
-                  title={`打开「${p.name}」`}
+                  title={`${IS_DESKTOP_BUILD && desktopView === 'server' ? '下载' : '打开'}「${p.name}」`}
                 >
-                  <ProjectThumb nodes={p.graph.nodes} edges={p.graph.edges} theme={theme} />
-                  {p.id === currentId && (
+                  {IS_DESKTOP_BUILD && desktopView === 'server'
+                    ? <span className="text-sm text-sky-500">下载到本地</span>
+                    : <ProjectThumb nodes={p.graph.nodes} edges={p.graph.edges} theme={theme} />}
+                  {p.id === currentId && (!IS_DESKTOP_BUILD || desktopView === 'local') && (
                     <span className="absolute right-2 top-2 rounded bg-sky-600/80 px-1.5 py-0.5 text-[10px] text-white">
                       当前
                     </span>
@@ -916,14 +999,27 @@ export function HomePage() {
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-3 border-t border-edge px-3.5 py-1.5 text-[11px] text-dim">
-                  <span>{p.graph.nodes.length} 个元素</span>
+                <div className="flex flex-wrap items-center gap-3 border-t border-edge px-3.5 py-1.5 text-[11px] text-dim">
+                  <span>{IS_DESKTOP_BUILD && desktopView === 'server' ? '服务器项目' : `${p.graph.nodes.length} 个元素`}</span>
+                  {IS_DESKTOP_BUILD && desktopView === 'local' && <DesktopCloudSaveButton projectId={p.id} />}
+                  {!IS_ONLINE_BUILD && !isSharedId(p.id) && (
+                    <button
+                      type="button"
+                      onClick={() => void handleSync(p)}
+                      disabled={busy || lanStatus !== 'connected' || (IS_DESKTOP_BUILD && remoteIdSet.has(p.id))}
+                      title={lanStatus === 'connected' ? '将本地项目及素材保存到当前服务器' : '请先连接局域网服务器'}
+                      className="rounded px-1.5 py-1 text-sky-500 hover:bg-hover disabled:opacity-50"
+                    >
+                      {IS_DESKTOP_BUILD && remoteIdSet.has(p.id) ? '服务器已有副本' : '同步到服务器'}
+                    </button>
+                  )}
                   <span className="ml-auto tabular-nums">{fmtTime(p.updatedAt)}</span>
                 </div>
               </div>
             ))}
           </div>
         )}
+        </>}
       </div>
 
       <input

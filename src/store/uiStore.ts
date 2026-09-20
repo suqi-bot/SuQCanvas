@@ -16,6 +16,7 @@ export interface ToastItem {
 }
 
 interface UiState {
+  busyMessage: string
   toasts: ToastItem[]
   pushToast: (message: string, kind?: ToastKind) => void
   removeToast: (id: number) => void
@@ -47,6 +48,7 @@ interface UiState {
 let toastId = 0
 
 export const useUiStore = create<UiState>((set, get) => ({
+  busyMessage: '',
   toasts: [],
   pushToast: (message, kind = 'info') => {
     const id = ++toastId

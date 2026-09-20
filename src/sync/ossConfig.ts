@@ -1,5 +1,5 @@
 // 直接读取构建目标：define 替换后为模块内字面量，死分支可被摇树移除
-const IS_ONLINE: boolean = import.meta.env.VITE_BUILD_TARGET !== 'lan'
+const IS_ONLINE: boolean = import.meta.env.VITE_BUILD_TARGET !== 'lan' && import.meta.env.VITE_BUILD_TARGET !== 'desktop'
 
 export function isOssConfigured(): boolean {
   if (!IS_ONLINE) return false

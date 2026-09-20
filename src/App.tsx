@@ -15,20 +15,22 @@ import { useUiStore } from './store/uiStore'
 import { useAuthStore } from './store/authStore'
 import { repairStuckUploads } from './store/uploadStore'
 import { initLanSync, autoReconnectLan } from './sync/lanClient'
-import { IS_LAN_BUILD } from './buildMode'
+import { IS_LAN_BUILD, IS_DESKTOP_BUILD } from './buildMode'
+import { DesktopLifecycle } from './desktop/DesktopLifecycle'
 
 export default function App() {
   const user = useAuthStore((s) => s.user)
   const guest = useAuthStore((s) => s.guest)
   const loading = useAuthStore((s) => s.loading)
   const busy = useProjectStore((s) => s.busy)
+  const busyMessage = useUiStore((s) => s.busyMessage)
 
   useEffect(() => {
     void useAuthStore.getState().init().then(() => {
       if (IS_LAN_BUILD) autoReconnectLan()
       else void repairStuckUploads()
     })
-    if (IS_LAN_BUILD) return initLanSync()
+    if (IS_LAN_BUILD && !IS_DESKTOP_BUILD) return initLanSync()
   }, [])
 
   // 只依赖布尔值：Supabase token 自动刷新会产生新的 user 对象，
@@ -64,11 +66,12 @@ export default function App() {
       <FileManagerModal />
       <GlobalPlayer />
       <Toasts />
+      {IS_DESKTOP_BUILD && <DesktopLifecycle />}
       {busy && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--overlay)]">
           <div className="flex items-center gap-3 rounded-xl border border-edge bg-panel px-6 py-4 shadow-2xl">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
-            <span className="text-sm text-soft">项目加载中…</span>
+            <span role="status" className="text-sm text-soft">{busyMessage || '项目加载中…'}</span>
           </div>
         </div>
       )}

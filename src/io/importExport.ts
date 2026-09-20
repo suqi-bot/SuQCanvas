@@ -84,7 +84,11 @@ function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
   return copy
 }
 
-export function downloadBlob(blob: Blob, filename: string): void {  const url = URL.createObjectURL(blob)
+export async function downloadBlob(blob: Blob, filename: string): Promise<boolean> {
+  if (typeof window !== 'undefined' && window.suqDesktop) {
+    return window.suqDesktop.saveFile(filename, new Uint8Array(await blob.arrayBuffer()))
+  }
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = filename
@@ -92,6 +96,7 @@ export function downloadBlob(blob: Blob, filename: string): void {  const url = 
   a.click()
   a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  return true
 }
 
 export async function exportCurrentProject(): Promise<void> {
@@ -101,7 +106,7 @@ export async function exportCurrentProject(): Promise<void> {
   try {
     const blob = await exportProjectToBlob(project.projectName, nodes, edges, viewport)
     const safeName = (project.projectName || '未命名项目').replace(/[\\/:*?"<>|]/g, '_')
-    downloadBlob(blob, `${safeName}.sqcanvas`)
+    if (!(await downloadBlob(blob, `${safeName}.sqcanvas`))) return
     toast('项目已导出', 'success')
   } catch (err) {
     console.error(err)

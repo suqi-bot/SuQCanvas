@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { AuthError, User } from '@supabase/supabase-js'
 import { supabase } from '../sync/supabaseClient'
-import { IS_LAN_BUILD } from '../buildMode'
+import { IS_LAN_BUILD, IS_DESKTOP_BUILD } from '../buildMode'
 import { useProjectStore } from './projectStore'
 import { useCanvasStore } from './canvasStore'
 
@@ -47,6 +47,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loading: true,
 
   init: async () => {
+    if (IS_DESKTOP_BUILD) {
+      set({ user: null, guest: true, loading: false })
+      return
+    }
     const persistedGuest = localStorage.getItem(GUEST_KEY) === '1'
     if (!supabase) {
       let hasLanProfile = false

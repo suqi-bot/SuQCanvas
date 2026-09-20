@@ -7,7 +7,8 @@ import { useCanvasStore, type AlignMode } from '../store/canvasStore'
 import { usePlayerStore } from '../store/playerStore'
 import { exportCurrentProject } from '../io/importExport'
 import { LanPanel } from './LanPanel'
-import { IS_LAN_BUILD } from '../buildMode'
+import { IS_LAN_BUILD, IS_DESKTOP_BUILD } from '../buildMode'
+import DesktopCloudSaveButton from '../desktop/DesktopCloudSaveButton'
 import { STICKY_COLORS } from '../types'
 import { CanvasSearch } from './CanvasSearch'
 import {
@@ -109,6 +110,7 @@ export function Toolbar() {
   const tool = useUiStore((s) => s.tool)
   const setTool = useUiStore((s) => s.setTool)
   const projectName = useProjectStore((s) => s.projectName)
+  const projectId = useProjectStore((s) => s.projectId)
   const saveStatus = useProjectStore((s) => s.saveStatus)
   const theme = useSettingsStore((s) => s.theme)
   const toggleTheme = useSettingsStore((s) => s.toggleTheme)
@@ -205,6 +207,7 @@ export function Toolbar() {
       </button>
 
       <CanvasSearch />
+      {IS_DESKTOP_BUILD && <DesktopCloudSaveButton projectId={projectId} />}
 
       <button
         type="button"

@@ -1,0 +1,19 @@
+{
+  "appId": "com.suqcanvas.desktop",
+  "productName": "SuQCanvas",
+  "directories": { "output": "release/desktop", "buildResources": "desktop" },
+  "files": ["desktop/main.cjs", "desktop/preload.cjs", "desktop/icon.ico", "dist-desktop/**/*", "package.json", "!node_modules/**/*"],
+  "asar": true,
+  "npmRebuild": false,
+  "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "desktop/icon.ico" },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "deleteAppDataOnUninstall": false,
+    "artifactName": "SuQCanvas-${version}-Setup-${arch}.${ext}"
+  },
+  "fileAssociations": [{ "ext": "sqcanvas", "name": "SuQCanvas 项目", "role": "Editor" }]
+}

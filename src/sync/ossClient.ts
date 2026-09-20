@@ -2,7 +2,7 @@
 
 // 局域网版构建时 define 替换为 'lan'，IS_ONLINE 折叠为 false，
 // 动态导入分支被摇树移除，ossClientImpl 及其依赖的 ali-oss 不会进入产物
-const IS_ONLINE: boolean = import.meta.env.VITE_BUILD_TARGET !== 'lan'
+const IS_ONLINE: boolean = import.meta.env.VITE_BUILD_TARGET !== 'lan' && import.meta.env.VITE_BUILD_TARGET !== 'desktop'
 
 export { assetKey, isOssConfigured, thumbKey }
 

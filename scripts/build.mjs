@@ -11,12 +11,14 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadEnv } from 'vite'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 const TARGETS = {
   online: { label: '在线版（云端同步）', mode: 'online', outDir: 'dist' },
   lan: { label: '局域网版（局域网协作）', mode: 'lan', outDir: 'dist-lan' },
+  desktop: { label: '桌面版（离线项目）', mode: 'desktop', outDir: 'dist-desktop' },
 }
 
 function run(scriptPath, args = []) {
@@ -55,10 +57,20 @@ function build(target) {
   const { label, mode, outDir } = TARGETS[target]
   console.log(`\n▶ 构建${label} -> ${outDir}/\n`)
   const viteBin = resolve(root, 'node_modules/vite/bin/vite.js')
+  const env = { ...process.env }
+  if (target === 'desktop') {
+    const online = loadEnv('online', root, 'VITE_')
+    const desktop = loadEnv('desktop', root, 'VITE_')
+    // Only public connection settings. Permanent OSS credentials are never copied into desktop builds.
+    for (const key of ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'VITE_OSS_REGION', 'VITE_OSS_BUCKET', 'VITE_OSS_STS_URL']) {
+      const value = desktop[key] || online[key]
+      if (value) env[key] = value
+    }
+  }
   const r = spawnSync(
     process.execPath,
     [viteBin, 'build', '--mode', mode, '--outDir', outDir, '--emptyOutDir'],
-    { cwd: root, stdio: 'inherit' },
+    { cwd: root, stdio: 'inherit', env },
   )
   if (r.status !== 0) process.exit(r.status ?? 1)
 }
@@ -82,7 +94,7 @@ async function askTarget() {
 }
 
 const arg = process.argv[2]
-const map = { online: ['online'], lan: ['lan'], all: ['online', 'lan'] }
+const map = { online: ['online'], lan: ['lan'], desktop: ['desktop'], all: ['online', 'lan'] }
 const targets = map[arg] ?? (process.stdin.isTTY ? await askTarget() : ['online', 'lan'])
 
 copyPdfjsAssets()

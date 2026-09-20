@@ -6,6 +6,7 @@ import type { AssetMeta, SuqEdge, SuqNode } from '../types'
 import type { Viewport } from '@xyflow/react'
 import { getLanUserColor } from './lanColors'
 import { getDeviceId } from '../utils/deviceId'
+import { IS_DESKTOP_BUILD } from '../buildMode'
 
 // 分片大小取 3 的倍数，使每个分片的 base64 都对齐到字节边界，
 // 各分片无填充 base64 拼接后才能精确还原原始数据
@@ -48,6 +49,7 @@ export function resolveLanUrl(
 export function getDefaultLanUrl(): string {
   const configured = import.meta.env.VITE_LAN_WS_URL?.trim()
   if (configured) return configured
+  if (IS_DESKTOP_BUILD) return ''
   if (typeof window === 'undefined') return 'ws://192.168.1.100:8790'
   if (window.location.protocol === 'http:') {
     // 宝塔用 IP/HTTP 直接部署时通常没有 Nginx WebSocket 反代，直接连接中继端口。
@@ -309,6 +311,7 @@ export function lanConnect(url: string, name: string, opts: { isReconnect?: bool
       void fetchProjectFromLan(activeProjectId)
     }
     toast(opts.isReconnect ? '已恢复局域网协作连接' : '已连接局域网协作', 'success')
+    if (IS_DESKTOP_BUILD) return
     // 加入后请求当前画布引用的素材 + 重连续传未完成的素材（接收端跳过已收分片）
     const nodeAssetIds = new Set<string>()
     for (const n of useCanvasStore.getState().nodes) {
@@ -407,6 +410,7 @@ export function autoReconnectLan(): void {
 }
 
 function handleMessage(msg: LanMessage): void {
+  if (IS_DESKTOP_BUILD && !['welcome', 'users', 'project-list'].includes(msg.t)) return
   const lan = useLanStore.getState()
   switch (msg.t) {
     case 'welcome':
@@ -452,6 +456,7 @@ function handleMessage(msg: LanMessage): void {
       break
     }
     case 'project-data': {
+      if (IS_DESKTOP_BUILD) break
       const project = msg.project as ProjectRecord | undefined
       if (!project?.id) break
       const waiters = projectDataWaiters.get(project.id)
@@ -492,6 +497,7 @@ function handleMessage(msg: LanMessage): void {
       break
     }
     case 'project-deleted': {
+      if (IS_DESKTOP_BUILD) break
       const projectId = String(msg.projectId ?? '')
       if (!projectId) break
       void db.projects.delete(projectId)
@@ -769,6 +775,7 @@ export async function broadcastLocalProjects(): Promise<void> {
 
 /** 加入一个项目房间；实时画布、视口和素材只在该项目内传输。 */
 export function joinLanProject(projectId: string): void {
+  if (IS_DESKTOP_BUILD) return
   const lan = useLanStore.getState()
   if (lan.activeProjectId === projectId) return
   lan.setActiveProjectId(projectId)
@@ -834,6 +841,7 @@ function emitLockChange(nodeId: string, locked: boolean): void {
 
 /** 将项目快照保存到运行中继服务的局域网主机。 */
 export function saveProjectToLan(project: ProjectRecord): boolean {
+  if (IS_DESKTOP_BUILD) return false
   if (!isLanConnected()) return false
   send({ t: 'project-save', project, deviceId: getDeviceId() })
   return true
@@ -1040,6 +1048,7 @@ function receiveAssetThumb(msg: LanMessage): void {
  * 的设备（通常就是上传端）在渲染到时补推一次，旧库无需重新导入即可自愈。
  */
 export function pushThumbnailToServer(assetId: string, thumbnail: Blob): void {
+  if (IS_DESKTOP_BUILD) return
   if (!isLanConnected()) return
   if (thumbPushed.has(assetId)) return
   thumbPushed.add(assetId)
@@ -1052,6 +1061,7 @@ export async function pushAssetToLan(
   blob: Blob,
   thumbnail?: Blob,
 ): Promise<void> {
+  if (IS_DESKTOP_BUILD) return
   if (!isLanConnected()) return
   const total = Math.max(1, Math.ceil(blob.size / CHUNK_SIZE))
   // 视频只上传给中继服务器缓存（to: 'server'），不再向房间内所有设备广播整份文件：

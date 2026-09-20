@@ -27,6 +27,16 @@ export interface ProjectRecord {
   viewport: Viewport
 }
 
+/** Desktop-only association, kept outside exported/local project data. */
+export interface DesktopCloudLink {
+  localProjectId: string
+  owner: string
+  projectId: string
+  updatedAt: string | null
+  name: string
+  localName: string
+}
+
 /** ali-oss 分片上传断点续传数据，不含不可序列化的 file 引用 */
 export interface OssCheckpointData {
   /** OSS object key */
@@ -52,6 +62,7 @@ export const db = new Dexie('suqcanvas') as Dexie & {
   assets: EntityTable<AssetRecord, 'id'>
   projects: EntityTable<ProjectRecord, 'id'>
   uploadCheckpoints: EntityTable<UploadCheckpointRecord, 'assetId'>
+  desktopCloudLinks: EntityTable<DesktopCloudLink, 'localProjectId'>
 }
 
 db.version(1).stores({
@@ -63,6 +74,7 @@ db.version(2).stores({
   projects: 'id, updatedAt',
   uploadCheckpoints: 'assetId',
 })
+db.version(3).stores({ desktopCloudLinks: 'localProjectId' })
 
 export async function requestPersistentStorage(): Promise<boolean> {
   try {

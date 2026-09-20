@@ -3,6 +3,7 @@ import { useLanStore } from '../store/lanStore'
 import { getDefaultLanUrl, getSavedLanConfig, lanConnect, lanDisconnect } from '../sync/lanClient'
 import { LanIcon } from '../canvas/nodes/Icons'
 import { getLanUserColor } from '../sync/lanColors'
+import { IS_DESKTOP_BUILD } from '../buildMode'
 
 const inputCls =
   'w-full rounded-lg border border-edge2 bg-panel2 px-3 py-1.5 text-sm text-main outline-none placeholder:text-dim focus:border-sky-500'
@@ -67,12 +68,13 @@ export function LanPanel() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title="局域网协作"
-        className={`relative rounded-md border p-1.5 transition-colors hover:bg-hover ${
+        title={IS_DESKTOP_BUILD ? '连接服务器' : '局域网协作'}
+        className={`relative inline-flex items-center gap-1.5 rounded-md border p-1.5 transition-colors hover:bg-hover ${
           connected ? 'border-emerald-500/60 text-emerald-500' : 'border-edge2 text-soft hover:text-main'
         }`}
       >
         <LanIcon />
+        {IS_DESKTOP_BUILD && <span className="ml-1 text-xs">{connected ? '服务器已连接' : '连接服务器'}</span>}
         {connected && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-500" />}
       </button>
 
@@ -81,7 +83,7 @@ export function LanPanel() {
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-2 text-sm font-medium text-main">
               <span className={`h-2 w-2 rounded-full ${STATUS_CLS[status]}`} />
-              局域网协作
+              {IS_DESKTOP_BUILD ? '服务器连接' : '局域网协作'}
             </span>
             <span className="text-xs text-dim">{status === 'connected' ? '已连接' : status === 'connecting' ? '连接中…' : status === 'error' ? '连接失败' : '未连接'}</span>
           </div>
@@ -120,7 +122,7 @@ export function LanPanel() {
             )}
           </form>
 
-          <div className="mt-4">
+          {!IS_DESKTOP_BUILD && <div className="mt-4">
             <div className="mb-1.5 text-xs text-dim">
               {activeProjectId ? `当前项目协作者（${others.length + 1}）` : '尚未打开协作项目'}
             </div>
@@ -157,9 +159,9 @@ export function LanPanel() {
               ))}
               {!connected && <li className="px-2.5 py-1.5 text-xs text-dim">尚未连接，输入中继地址加入协作</li>}
             </ul>
-          </div>
+          </div>}
 
-          {connected && activeProjectId && (
+          {!IS_DESKTOP_BUILD && connected && activeProjectId && (
             <div className="mt-3 border-t border-edge pt-3">
               <div className="mb-1.5 text-xs text-dim">正在编辑</div>
               <div className="space-y-1">
@@ -186,10 +188,12 @@ export function LanPanel() {
           )}
 
           <p className="mt-3 border-t border-edge pt-2.5 text-[11px] leading-relaxed text-dim">
+            {IS_DESKTOP_BUILD ? '连接后可在首页上传本地项目或下载服务器项目。断开连接不影响本地编辑。' : <>
             宝塔部署默认使用同域名 <code className="rounded bg-hover px-1">/lan-ws</code> 反代；局域网直连可输入
             <code className="rounded bg-hover px-1">ws://IP:8790</code>。
             <br />
             项目按房间独立协作，并自动保存到运行中继服务的主机设备。
+            </>}
           </p>
         </div>
       )}

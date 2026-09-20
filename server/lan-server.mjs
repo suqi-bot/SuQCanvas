@@ -67,8 +67,11 @@ function persistProjects() {
   const payload = JSON.stringify([...projects.values()], null, 2)
   projectWrite = projectWrite
     .catch(() => undefined)
-    .then(() => writeFile(PROJECTS_FILE, payload, 'utf8'))
-    .catch((error) => console.error('[SuQCanvas LAN] Failed to save projects:', error))
+    .then(() => writeFile(PROJECTS_FILE, payload, 'utf8')).then(() => true)
+    .catch((error) => {
+      console.error('[SuQCanvas LAN] Failed to save projects:', error)
+      return false
+    })
   return projectWrite
 }
 
@@ -541,6 +544,7 @@ async function cacheAssetChunk(info, msg) {
         writeFile(paths.meta, JSON.stringify({ ...pending.meta, id: assetId }), 'utf8'),
       ])
       requestedAssets.delete(assetId)
+      return true
     } catch (error) {
       await pending.handle?.close().catch(() => undefined)
       pending.handle = null
@@ -548,8 +552,10 @@ async function cacheAssetChunk(info, msg) {
       pendingAssets.delete(key)
       requestedAssets.delete(assetId)
       console.warn('[SuQCanvas LAN] Failed to cache asset:', error)
+      return false
     }
   }).catch(() => undefined)
+  return pending.writeChain
 }
 
 /** 缓存客户端随资产上传的封面字节：先写临时文件再 rename，避免并发上传读到半截文件 */
@@ -570,6 +576,7 @@ async function cacheAssetThumb(info, msg) {
   } catch (error) {
     await rm(tmpPath, { force: true }).catch(() => undefined)
     console.warn('[SuQCanvas LAN] Failed to cache thumbnail:', error)
+    return false
   }
 }
 
@@ -665,6 +672,8 @@ wss.on('connection', (ws, req) => {
   const id = randomUUID()
   const info = { id, name: `设备-${id.slice(0, 4)}`, ip, color: nextUserColor(), projectId: null, deviceId: null }
   clients.set(ws, info)
+  const syncWrites = new Map()
+  let syncingProject = null
 
   sendTo(ws, { t: 'welcome', id, users: userList(null), projects: projectList() })
   broadcastUsers()
@@ -690,6 +699,51 @@ wss.on('connection', (ws, req) => {
 
     if (msg.t === 'project-list-request') {
       sendProjectList(ws)
+      return
+    }
+
+    if (msg.t === 'local-sync-start') {
+      const projectId = String(msg.projectId ?? '')
+      if (!isSafeId(projectId)) return
+      const error = projects.has(projectId) ? '服务器已有此项目，请打开共享项目继续编辑' : null
+      if (!error) {
+        syncingProject = projectId
+        info.projectId = projectId
+      }
+      sendTo(ws, { t: 'local-sync-result', requestId: msg.requestId, error })
+      return
+    }
+
+    if (msg.t === 'local-sync-commit') {
+      void (async () => {
+        const respond = (error) => sendTo(ws, { t: 'local-sync-result', requestId: msg.requestId, error })
+        const project = normalizeProject(msg.project)
+        if (!project || project.id !== syncingProject) return respond('无效的同步项目')
+        const results = await Promise.all(syncWrites.values())
+        if (results.some((result) => result === false)) return respond('素材保存失败，请重试')
+        for (const node of project.graph.nodes) {
+          for (const assetId of [node?.data?.assetId, node?.data?.coverAssetId]) {
+            if (!assetId) continue
+            if (!isSafeId(assetId)) return respond('无效的素材 ID')
+            const paths = assetPaths(assetId)
+            if (!(await access(paths.data).then(() => true, () => false)) ||
+                !(await access(paths.meta).then(() => true, () => false))) return respond('素材保存失败，请重试')
+          }
+        }
+        if (projects.has(project.id)) return respond('服务器已有此项目，请打开共享项目继续编辑')
+        project.creatorId = info.deviceId || info.id
+        projects.set(project.id, project)
+        if (!(await persistProjects())) {
+          if (projects.get(project.id) === project) projects.delete(project.id)
+          return respond('服务器保存失败，请检查磁盘后重试')
+        }
+        respond(null)
+        broadcastProjectList()
+        scheduleMaintenance()
+      })().catch((error) => {
+        console.warn('[SuQCanvas LAN] Local sync failed:', error)
+        sendTo(ws, { t: 'local-sync-result', requestId: msg.requestId, error: '服务器同步失败，请重试' })
+      })
       return
     }
 
@@ -878,8 +932,14 @@ wss.on('connection', (ws, req) => {
     ) {
       msg.from = info.id
       msg.color = info.color
-      if (msg.t === 'asset-chunk') void cacheAssetChunk(info, msg)
-      if (msg.t === 'asset-thumb') void cacheAssetThumb(info, msg)
+      if (msg.t === 'asset-chunk') {
+        const write = cacheAssetChunk(info, msg)
+        if (syncingProject) syncWrites.set(`asset:${msg.assetId}`, write)
+      }
+      if (msg.t === 'asset-thumb') {
+        const write = cacheAssetThumb(info, msg)
+        if (syncingProject) syncWrites.set(`thumb:${msg.assetId}`, write)
+      }
       const target = msg.to
         ? [...clients.entries()].find(([, client]) => client.id === msg.to && client.projectId === info.projectId)
         : null

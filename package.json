@@ -17,7 +17,10 @@
     "test": "vitest run",
     "preview": "vite preview",
     "lan": "node server/lan-server.mjs",
-    "lan:open": "powershell -ExecutionPolicy Bypass -File scripts/open-lan-firewall.ps1"
+    "lan:open": "powershell -ExecutionPolicy Bypass -File scripts/open-lan-firewall.ps1",
+    "build:desktop": "tsc -b && node scripts/build.mjs desktop",
+    "desktop": "npm run build:desktop && electron .",
+    "package:desktop": "npm run build:desktop && electron-builder --win --publish never"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
@@ -41,11 +44,16 @@
     "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.4",
+    "electron": "^44.4.3",
+    "electron-builder": "^26.15.3",
     "fake-indexeddb": "^6.2.5",
     "oxlint": "^1.75.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",
     "vitest": "^4.1.10"
-  }
+  },
+  "main": "desktop/main.cjs",
+  "description": "SuQCanvas 离线画布与局域网项目同步",
+  "author": "SuQCanvas"
 }

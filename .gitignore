@@ -10,6 +10,9 @@ lerna-debug.log*
 node_modules
 dist
 dist-lan
+dist-desktop
+.npm-cache/
+.desktop-test/
 dist.zip
 lan-deploy.zip
 release/
@@ -26,6 +29,7 @@ public/pdfjs
 !.env.example
 !.env.online
 !.env.lan
+!.env.desktop
 
 # Editor directories and files
 .vscode/*

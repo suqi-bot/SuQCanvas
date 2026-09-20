@@ -9,6 +9,9 @@ import { WebSocket } from 'ws'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { getThumbnailUrl } from '../media/blobRegistry'
 import { db } from '../db/db'
+import type { ProjectRecord } from '../db/db'
+import { syncLocalProjectToLan } from './localProjectSync'
+import { downloadLanProject } from './downloadLanProject'
 import { useCanvasStore } from '../store/canvasStore'
 import { useLanStore } from '../store/lanStore'
 import type { SuqNode } from '../types'
@@ -111,6 +114,87 @@ function encodeChunks(bytes: Uint8Array): string[] {
 function decodeChunks(parts: string[]): Uint8Array {
   return b64ToUint8(parts.join(''))
 }
+
+describe('本地项目同步到服务器', () => {
+  const project: ProjectRecord = {
+    id: 'local-sync-project', name: '本地素材项目', createdAt: 123, updatedAt: 456,
+    graph: { nodes: [{ id: 'local-sync-node', position: { x: 1, y: 2 },
+      data: { kind: 'video', assetId: 'local-sync-video', coverAssetId: 'local-sync-cover' } }], edges: [] },
+    viewport: { x: 3, y: 4, zoom: 0.5 },
+  }
+
+  it('确认成功前项目、多分片原文件和封面均已落盘，保留本地及当前房间', async () => {
+    const bytes = new Uint8Array(CHUNK * 10 + 7).fill(91)
+    const thumbnail = new Blob(['thumbnail'])
+    await db.assets.bulkPut([
+      { id: 'local-sync-video', name: 'test.mp4', kind: 'video', mime: 'video/mp4', size: bytes.length,
+        blob: new Blob([bytes]), thumbnail },
+      { id: 'local-sync-cover', name: 'cover.png', kind: 'image', mime: 'image/png', size: 5,
+        blob: new Blob(['cover']) },
+    ])
+    await db.projects.put(project)
+    const activeId = useLanStore.getState().activeProjectId
+    const progress: string[] = []
+    await syncLocalProjectToLan(project, (message) => progress.push(message))
+    const saved = JSON.parse(await readFile(join(dataDir, 'projects.json'), 'utf8'))
+    expect(saved.find((p: ProjectRecord) => p.id === project.id)).toMatchObject({ ...project, updatedAt: expect.any(Number) })
+    for (const [id, expected] of [['local-sync-video', Buffer.from(bytes)], ['local-sync-cover', Buffer.from('cover')]] as const) {
+      const key = createHash('sha256').update(id).digest('hex')
+      expect(await readFile(join(dataDir, 'assets', `${key}.bin`))).toEqual(expected)
+    }
+    const key = createHash('sha256').update('local-sync-video').digest('hex')
+    expect(await readFile(join(dataDir, 'assets', `${key}.thumb`), 'utf8')).toBe('thumbnail')
+    expect(await db.projects.get(project.id)).toEqual(project)
+    expect(useLanStore.getState().activeProjectId).toBe(activeId)
+    expect(progress).toHaveLength(3)
+  }, 15000)
+
+  it('拒绝覆盖服务器同 ID 项目', async () => {
+    await expect(syncLocalProjectToLan({ ...project, name: '不能覆盖' })).rejects.toThrow('服务器已有此项目')
+    const saved = JSON.parse(await readFile(join(dataDir, 'projects.json'), 'utf8'))
+    expect(saved.find((p: ProjectRecord) => p.id === project.id).name).toBe(project.name)
+  })
+
+  it('素材缺失时不发布不完整项目', async () => {
+    const missing = { ...project, id: 'missing-local-project', graph: { ...project.graph,
+      nodes: [{ ...project.graph.nodes[0], data: { kind: 'image' as const, assetId: 'missing-asset' } }] } }
+    await expect(syncLocalProjectToLan(missing)).rejects.toThrow('本地素材不完整')
+    const saved = JSON.parse(await readFile(join(dataDir, 'projects.json'), 'utf8'))
+    expect(saved.some((p: ProjectRecord) => p.id === missing.id)).toBe(false)
+  })
+
+  it('空项目也可同步', async () => {
+    const empty = { ...project, id: 'empty-local-project', graph: { nodes: [], edges: [] } }
+    await syncLocalProjectToLan(empty)
+    const saved = JSON.parse(await readFile(join(dataDir, 'projects.json'), 'utf8'))
+    expect(saved.find((p: ProjectRecord) => p.id === empty.id)).toMatchObject({ ...empty, updatedAt: expect.any(Number) })
+  })
+
+  it('服务器项目下载为独立本地副本，视频和封面完整保存且不切换当前画布', async () => {
+    const activeId = useLanStore.getState().activeProjectId
+    const copy = await downloadLanProject(project.id)
+    expect(copy.id).not.toBe(project.id)
+    expect(copy.name).toBe(`${project.name}（本地副本）`)
+    expect(copy.viewport).toEqual(project.viewport)
+    const data = copy.graph.nodes[0].data
+    expect(data.assetId).not.toBe('local-sync-video')
+    expect(data.coverAssetId).not.toBe('local-sync-cover')
+    const video = await db.assets.get(data.assetId!)
+    expect(video!.blob.size).toBe(CHUNK * 10 + 7)
+    expect(new Uint8Array(await video!.blob.arrayBuffer()).every((byte) => byte === 91)).toBe(true)
+    expect(await video!.thumbnail!.text()).toBe('thumbnail')
+    expect(await (await db.assets.get(data.coverAssetId!))!.blob.text()).toBe('cover')
+    expect(await db.projects.get(copy.id)).toEqual(copy)
+    expect(await db.projects.get(project.id)).toEqual(project)
+    expect(useLanStore.getState().activeProjectId).toBe(activeId)
+  }, 15000)
+
+  it('下载不存在的项目明确失败，不创建空副本', async () => {
+    const count = await db.projects.count()
+    await expect(downloadLanProject('missing-server-project')).rejects.toThrow('服务器项目已不存在')
+    expect(await db.projects.count()).toBe(count)
+  })
+})
 
 describe('base64 分片往返', () => {
   it('跨多分片（含尾部不满分片）字节完全一致', () => {
@@ -461,8 +545,8 @@ describe('LAN 协作项目', () => {
     )
     await sleep(400)
     const projects = JSON.parse(await readFile(join(dataDir, 'projects.json'), 'utf8'))
-    expect(projects).toHaveLength(1)
-    expect(projects[0].name).toBe('共享项目')
+    expect(projects.filter((p: ProjectRecord) => p.id === 'test-project')).toHaveLength(1)
+    expect(projects.find((p: ProjectRecord) => p.id === 'test-project').name).toBe('共享项目')
   })
 
   it('不同项目房间不会互相转发画布消息', async () => {
