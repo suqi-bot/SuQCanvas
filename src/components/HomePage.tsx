@@ -444,6 +444,8 @@ export function HomePage() {
   const setSyncProgress = (busyMessage: string) => useUiStore.setState({ busyMessage })
   const [desktopView, setDesktopView] = useState<'local' | 'server' | 'cloud'>('local')
   const [backups, setBackups] = useState<LanBackupMeta[] | null>(null)
+  const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<'updated' | 'name'>('updated')
 
   const refresh = useCallback(async () => {
     setProjects(await syncProjectList())
@@ -493,6 +495,11 @@ export function HomePage() {
     }
     return merged.sort((a, b) => b.updatedAt - a.updatedAt)
   }, [projects, remoteProjects, desktopView])
+
+  const filteredProjects = useMemo(() => visibleProjects
+    .filter((project) => project.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
+    .sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name, 'zh-CN') : b.updatedAt - a.updatedAt),
+  [visibleProjects, search, sort])
 
   if (!open) return null
 
@@ -684,14 +691,15 @@ export function HomePage() {
   }
 
   return (
-    <div className="fixed inset-0 z-40 overflow-y-auto bg-app text-main">
-      <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-8 py-6">
-        <header className="flex shrink-0 items-center gap-3">
+    <div className="sq-page-scroll fixed inset-0 z-40 overflow-y-auto bg-app text-main">
+      <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-6 sm:px-8">
+        <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-edge pb-5">
           <div className="flex shrink-0 items-baseline gap-2">
             <span className="text-lg font-bold tracking-wide">SuQCanvas</span>
+            {IS_DESKTOP_BUILD && <span className="text-sm font-medium text-soft">桌面版</span>}
             <span className="text-[11px] font-medium tabular-nums text-dim">{APP_VERSION}</span>
           </div>
-          <span className="text-xs text-dim">无限画布 · 项目总览</span>
+          <span className="hidden text-xs text-dim xl:inline">无限画布 · 项目总览</span>
           {IS_ONLINE_BUILD ? (
             <>
               {isCloudConfigured() ? (
@@ -715,7 +723,7 @@ export function HomePage() {
             </>
           ) : (
             <span className="rounded bg-violet-500/15 px-2 py-0.5 text-[11px] font-medium text-violet-400">
-              {IS_DESKTOP_BUILD ? '桌面版 · 离线可用' : '局域网版'}
+              {IS_DESKTOP_BUILD ? '离线可用' : '局域网版'}
             </span>
           )}
           <div className="flex-1" />
@@ -801,12 +809,12 @@ export function HomePage() {
           </button>
         </header>
 
-        <div className="my-6">
+        <div className="my-6 flex flex-wrap items-stretch gap-3">
           <button
             type="button"
             onClick={() => void handleNew()}
             disabled={busy}
-            className="group flex w-full items-center gap-4 rounded-2xl border-2 border-dashed border-edge2 bg-panel px-6 py-5 transition-colors hover:border-sky-500/60 hover:bg-hover/40 disabled:cursor-wait disabled:opacity-60 disabled:hover:border-edge2 disabled:hover:bg-panel"
+            className="group flex min-w-64 flex-1 items-center gap-4 rounded-2xl border border-edge2 bg-panel px-6 py-5 transition-colors hover:border-sky-500/60 hover:bg-hover/40 disabled:cursor-wait disabled:opacity-60 disabled:hover:border-edge2 disabled:hover:bg-panel"
           >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-600/15 text-sky-500 transition-colors group-hover:bg-sky-600 group-hover:text-white">
               <PlusIcon className="text-lg" />
@@ -816,6 +824,10 @@ export function HomePage() {
               <div className="mt-0.5 text-xs text-dim">创建一个空白画布，开始自由创作</div>
             </div>
           </button>
+          {currentId && <button type="button" onClick={() => setOpen(false)} disabled={busy}
+            className="rounded-2xl border border-edge2 bg-panel px-6 py-4 text-sm font-medium text-soft transition-colors hover:border-sky-500/60 hover:text-sky-500 disabled:opacity-50">
+            返回当前画布 →
+          </button>}
         </div>
 
         {backups !== null && (
@@ -867,14 +879,14 @@ export function HomePage() {
         )}
 
         {IS_DESKTOP_BUILD && (
-          <div className="mb-5 flex items-center gap-3 border-b border-edge pb-3">
+          <div className="mb-5 flex flex-wrap items-center gap-2 border-b border-edge pb-3">
             {(['local', 'cloud', 'server'] as const).map((view) => (
-              <button key={view} type="button" onClick={() => setDesktopView(view)} disabled={busy}
+              <button key={view} type="button" aria-pressed={desktopView === view} onClick={() => { setDesktopView(view); setSearch('') }} disabled={busy}
                 className={`rounded-lg px-4 py-2 text-sm ${desktopView === view ? 'bg-sky-600 text-white' : 'text-soft hover:bg-hover'}`}>
                 {view === 'local' ? `本地项目（${projects.length}）` : view === 'cloud' ? '在线项目' : `局域网项目（${remoteProjects.length}）`}
               </button>
             ))}
-            <span className="ml-auto text-xs text-dim">
+            <span className="w-full pt-1 text-xs leading-5 text-dim">
               {desktopView === 'cloud' ? '连接原在线版账号' : desktopView === 'local' ? '保存在此电脑 · 手动上传服务器' : lanStatus === 'connected' ? '下载独立副本后离线编辑' : '点击右上角连接图标，填写服务器地址'}
             </span>
           </div>
@@ -884,8 +896,17 @@ export function HomePage() {
             <DesktopCloudPanel onDownloaded={async () => { await refresh(); setDesktopView('local') }} />
           </Suspense>
         ) : <>
-        <div className="mb-3 text-xs font-medium uppercase tracking-wider text-dim">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="mr-auto text-sm font-medium text-soft">
           {IS_DESKTOP_BUILD ? desktopView === 'local' ? '本地项目' : '服务器项目' : '全部项目'}（{visibleProjects.length}）
+        </div>
+          <input type="search" aria-label="搜索项目" placeholder="搜索项目名称…" value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className="min-w-0 rounded-lg border border-edge2 bg-panel px-3 py-2 text-sm text-main placeholder:text-dim" />
+          <select aria-label="项目排序" value={sort} onChange={(event) => setSort(event.target.value as 'updated' | 'name')}
+            className="rounded-lg border border-edge2 bg-panel px-3 py-2 text-sm text-soft">
+            <option value="updated">最近更新</option><option value="name">名称排序</option>
+          </select>
         </div>
         {syncProgress && (
           <div role="status" className="mb-3 text-sm text-sky-500">{syncProgress}</div>
@@ -895,18 +916,18 @@ export function HomePage() {
           <div className="rounded-2xl border border-edge bg-panel py-16 text-center text-sm text-dim">
             项目加载中…
           </div>
-        ) : visibleProjects.length === 0 ? (
+        ) : filteredProjects.length === 0 ? (
           <div className="rounded-2xl border border-edge bg-panel py-16 text-center text-sm text-dim">
-            {IS_DESKTOP_BUILD && desktopView === 'server'
+            {search.trim() ? '没有找到匹配的项目，请尝试其他名称' : IS_DESKTOP_BUILD && desktopView === 'server'
               ? lanStatus === 'connected' ? '服务器上暂无项目，可以从本地项目上传' : '尚未连接服务器，本地项目仍可离线使用'
               : '暂无项目，点击上方「新建项目」开始'}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 pb-8 sm:grid-cols-2 lg:grid-cols-3">
-            {visibleProjects.map((p) => (
+            {filteredProjects.map((p) => (
               <div
                 key={p.id}
-                className={`group flex flex-col overflow-hidden rounded-2xl border bg-panel transition-colors hover:border-sky-500/50 ${
+                className={`sq-project-card group flex flex-col overflow-hidden rounded-2xl border bg-panel transition-[border-color,box-shadow] hover:border-sky-500/50 ${
                   p.id === currentId ? 'border-sky-600' : 'border-edge'
                 }`}
               >
@@ -931,7 +952,7 @@ export function HomePage() {
                     </span>
                   )}
                 </button>
-                <div className="flex items-center gap-2 px-3.5 py-2.5">
+                <div className="flex flex-wrap items-center gap-2 px-3.5 py-3">
                   {renaming === p.id ? (
                     <input
                       value={renameValue}
@@ -956,10 +977,11 @@ export function HomePage() {
                     </button>
                   )}
                   {!isRemoteOnlyId(p.id) && (
-                    <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                    <div className="flex w-full items-center gap-1 border-t border-edge pt-2">
                       <button
                         type="button"
                         title="重命名"
+                        disabled={busy}
                         onClick={() => {
                           setRenaming(p.id)
                           setRenameValue(p.name)
@@ -971,6 +993,7 @@ export function HomePage() {
                       <button
                         type="button"
                         title="导出"
+                        disabled={busy}
                         onClick={() => void handleExport(p)}
                         className="rounded px-1.5 py-1 text-xs text-mid hover:bg-hover hover:text-main"
                       >

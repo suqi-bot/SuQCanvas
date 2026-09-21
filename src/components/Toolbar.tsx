@@ -11,6 +11,7 @@ import { IS_LAN_BUILD, IS_DESKTOP_BUILD } from '../buildMode'
 import DesktopCloudSaveButton from '../desktop/DesktopCloudSaveButton'
 import { STICKY_COLORS } from '../types'
 import { CanvasSearch } from './CanvasSearch'
+import { AiImagePanel } from './AiImagePanel'
 import {
   AlignBottomIcon,
   AlignCenterHIcon,
@@ -163,7 +164,7 @@ export function Toolbar() {
   const status = STATUS_LABEL[saveStatus]
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-1 overflow-x-auto border-b border-edge bg-panel px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <header className="flex min-h-14 shrink-0 items-center gap-1 overflow-x-auto border-b border-edge bg-panel px-3 py-1.5">
       <button
         type="button"
         onClick={() => setHomeOpen(true)}
@@ -173,7 +174,7 @@ export function Toolbar() {
         <span className="text-sky-500">
           <HomeIcon />
         </span>
-        SuQCanvas
+        {IS_DESKTOP_BUILD ? '桌面版' : 'SuQCanvas'}
       </button>
 
       <div className="mx-1 h-5 w-px shrink-0 bg-edge2" />
@@ -207,6 +208,7 @@ export function Toolbar() {
       </button>
 
       <CanvasSearch />
+      <AiImagePanel />
       {IS_DESKTOP_BUILD && <DesktopCloudSaveButton projectId={projectId} />}
 
       <button

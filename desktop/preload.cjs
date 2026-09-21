@@ -7,6 +7,7 @@ function subscribe(channel, callback) {
 }
 contextBridge.exposeInMainWorld('suqDesktop', {
   ready: () => ipcRenderer.send('desktop:ready'),
+  aiRequest: (request) => ipcRenderer.invoke('desktop:ai-request', request),
   onOpenProject: (callback) => subscribe('desktop:open-project', callback),
   onBeforeClose: (callback) => subscribe('desktop:before-close', callback),
   closeReady: (ok) => ipcRenderer.send('desktop:close-ready', ok === true),

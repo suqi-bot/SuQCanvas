@@ -2,6 +2,9 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } = requ
 const { mkdir, readFile, writeFile } = require('node:fs/promises')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
+const { autoUpdater } = require('electron-updater')
+const { createUpdater } = require('./updater.cjs')
+const { aiRequest } = require('./ai-request.cjs')
 
 const APP_URL = 'suqcanvas://app/SuQCanvas/'
 protocol.registerSchemesAsPrivileged([{ scheme: 'suqcanvas', privileges: {
@@ -14,6 +17,8 @@ let window
 let closing = false
 let closeTimer
 let rendererReady = false
+let installRequested = false
+let updater
 const pendingFiles = process.argv.filter((arg) => path.isAbsolute(arg) && arg.toLowerCase().endsWith('.sqcanvas'))
 
 function trusted(event) {
@@ -57,7 +62,7 @@ else {
       return new Response(response.body, { status: response.status, headers })
     })
     window = new BrowserWindow({
-      title: 'SuQCanvas', width: 1360, height: 900, minWidth: 1000, minHeight: 680,
+      title: 'SuQCanvas 桌面版', width: 1360, height: 900, minWidth: 1000, minHeight: 680,
       backgroundColor: '#0f172a', show: false, icon: path.join(__dirname, 'icon.ico'),
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
         nodeIntegration: false, sandbox: true },
@@ -73,6 +78,11 @@ else {
       callback(permission === 'clipboard-sanitized-write')
     })
     window.once('ready-to-show', () => window.show())
+    updater = createUpdater({ app, window, dialog, autoUpdater, requestInstall: () => {
+      if (closeTimer || closing) return
+      installRequested = true
+      window.close()
+    } })
     window.on('close', (event) => {
       if (closing) return
       event.preventDefault()
@@ -80,19 +90,35 @@ else {
       window.webContents.send('desktop:before-close')
       closeTimer = setTimeout(async () => {
         closeTimer = undefined
+        if (installRequested) {
+          installRequested = false
+          await dialog.showMessageBox(window, { type: 'warning', message: '尚未确认保存完成，已取消安装。请稍后通过“检查更新”重试。' })
+          return
+        }
         const { response } = await dialog.showMessageBox(window, { type: 'warning',
           message: '应用尚未确认保存完成', detail: '可以返回继续等待，或退出应用。',
           buttons: ['返回应用', '仍然退出'], defaultId: 0, cancelId: 0 })
         if (response === 1) { closing = true; window.close() }
       }, 15000)
     })
-    ipcMain.on('desktop:ready', (event) => { trusted(event); rendererReady = true; void deliverFiles() })
+    ipcMain.on('desktop:ready', (event) => {
+      trusted(event)
+      if (!rendererReady) void updater.check()
+      rendererReady = true
+      void deliverFiles()
+    })
     ipcMain.on('desktop:close-ready', (event, ok) => {
       trusted(event)
       clearTimeout(closeTimer)
       closeTimer = undefined
-      if (ok) { closing = true; window.close() }
-      else void dialog.showMessageBox(window, { type: 'error', message: '项目尚未保存成功或传输仍在进行，请完成后再退出。' })
+      if (ok === true) {
+        closing = true
+        if (installRequested) updater.install()
+        else window.close()
+      } else {
+        installRequested = false
+        void dialog.showMessageBox(window, { type: 'error', message: '项目尚未保存成功或传输仍在进行，请完成后再退出。' })
+      }
     })
     ipcMain.handle('desktop:save-file', async (event, name, bytes) => {
       trusted(event)
@@ -105,6 +131,7 @@ else {
       return true
     })
     ipcMain.handle('desktop:show-data', async (event) => { trusted(event); return shell.openPath(app.getPath('userData')) })
+    ipcMain.handle('desktop:ai-request', async (event, request) => { trusted(event); return aiRequest(request) })
     const openProject = async () => {
       const result = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [{ name: 'SuQCanvas 项目', extensions: ['sqcanvas'] }] })
       pendingFiles.push(...result.filePaths)
@@ -118,8 +145,8 @@ else {
       ] },
       { label: '编辑', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
       { label: '视图', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'togglefullscreen' }] },
-      { label: '帮助', submenu: [{ label: '关于 SuQCanvas', click: () => void dialog.showMessageBox(window, {
-        message: `SuQCanvas ${app.getVersion()}`, detail: '离线画布 · 本地项目 · 服务器手动同步',
+      { label: '帮助', submenu: [{ label: '检查更新…', click: () => void updater.check(true) }, { label: '关于 SuQCanvas 桌面版', click: () => void dialog.showMessageBox(window, {
+        message: `SuQCanvas 桌面版 ${app.getVersion()}`, detail: '离线画布 · 本地项目 · 服务器手动同步',
       }) }] },
     ]))
     await window.loadURL(APP_URL)

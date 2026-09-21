@@ -1,0 +1,39 @@
+name: Desktop release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Check version tag
+        shell: pwsh
+        run: |
+          $packageVersion = (Get-Content package.json | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "v$packageVersion" -or $packageVersion -notmatch '^\d+\.\d+\.\d+$') {
+            throw 'Tag must match the stable package.json version, for example v1.3.1'
+          }
+      - run: npm ci
+      - run: npm test
+      - name: Build desktop
+        run: npm run build:desktop
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_OSS_REGION: ${{ vars.VITE_OSS_REGION }}
+          VITE_OSS_BUCKET: ${{ vars.VITE_OSS_BUCKET }}
+          VITE_OSS_STS_URL: ${{ vars.VITE_OSS_STS_URL }}
+      - name: Package and upload draft release
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

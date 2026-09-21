@@ -4,6 +4,8 @@
 
 ## 功能特性
 
+- **AI 生图**：工具栏连接本地 / 远程 ComfyUI 或 OpenAI 兼容 Images API，预览后加入画布；可选独立文字模型优化提示词。[配置与使用](docs/ai-image-generation.md)
+
 - **无限画布**：滚轮缩放、中键拖动视角、左键框选、双击空白新建文本
 - **多媒体元素**：拖入即用
   - 图片（PNG / JPG / GIF / WebP / SVG）
@@ -47,7 +49,7 @@ npm run desktop          # 构建并启动桌面应用
 npm run package:desktop  # 构建 Windows x64 安装程序 -> release/desktop/
 ```
 
-安装程序为 `release/desktop/SuQCanvas-1.3.0-Setup-x64.exe`，支持选择安装位置、桌面快捷方式和 `.sqcanvas` 文件关联。
+应用名称为「SuQCanvas 桌面版」，当前版本 1.4.1。安装程序为 `release/desktop/SuQCanvas-Desktop-1.4.1-Setup-x64.exe`，支持选择安装位置、桌面快捷方式和 `.sqcanvas` 文件关联。
 本地开发若安装环境跳过依赖的安装脚本，先运行 `node node_modules/electron/install.js` 下载 Electron 运行时。
 
 - **本地项目**：自动保存在 `%APPDATA%\SuQCanvas\` 下的应用 IndexedDB 中，项目包含原始素材；安装目录与数据目录分离，更新应用保留数据。
@@ -59,7 +61,18 @@ npm run package:desktop  # 构建 Windows x64 安装程序 -> release/desktop/
 - **退出与备份**：关闭窗口前等待项目保存完成，传输中或保存失败时保留窗口。可从「文件 → 打开数据目录」定位数据；备份整个目录前先退出应用，也可直接导出单个项目。
 
 桌面版连接服务器不会自动加入协作房间或上传本地改动。现有局域网网页版继续提供实时协作，中继服务仍需在服务器单独部署。
-当前安装包未配置代码签名及自动更新；发布签名和更新服务留待后续配置。
+桌面版启动后自动检查 GitHub Releases，也可在「帮助 → 检查更新」手动检查。用户确认后下载，标题栏和任务栏显示进度；下载完成后选择保存并重启安装，保存失败或传输忙碌时取消安装。选择稍后可再次从检查更新进入安装。离线自动检查失败不会打断工作。当前尚未配置代码签名。
+
+### 发布桌面更新
+
+更新源固定为 `suqi-bot/SuQCanvas` 的 GitHub Releases。仓库及安装附件需要允许用户公开读取；如果源码保持私有，请先将 `electron-builder.json` 的发布目标改为专用公开发布仓库，并为工作流提供仅允许向该仓库发布的令牌（令牌只能存储在 Actions secrets，不能放进客户端）。现有工作流使用本仓库的 `GITHUB_TOKEN`。
+
+1. 在 GitHub 仓库 Settings → Secrets and variables → Actions → Variables 中填写上面列出的五个公开云端连接配置，以便 CI 构建保留在线项目功能。未填写时仍可使用本地和局域网功能。不要填写 service_role 或 OSS 永久密钥。
+2. 运行 `npm version patch`（或 minor / major），同步修改 package.json、锁文件并创建版本标签；先确保工作区改动已提交。标签必须是与包版本一致的稳定版本，如 `v1.3.1`。
+3. 推送代码和该标签，例如 `git push origin HEAD`、`git push origin v1.3.1`。`.github/workflows/desktop-release.yml` 会在 Windows 上测试、构建并上传 Release 草稿。
+4. 在 GitHub Releases 检查草稿内含 `.exe`、`.exe.blockmap` 和 `latest.yml`，填写更新说明，确认后点击 Publish release。草稿不会推送给用户；不要只上传源码压缩包。
+
+普通提交不发布更新。首次接入时，已安装旧版的用户需要手动安装一次带更新功能的安装包；后续更高版本才会通过该更新源提示。发布前应使用两个实际版本验证下载、保存、重启安装和项目保留。不要随意更换更新仓库地址，否则已安装客户端仍会访问旧地址。
 
 桌面构建默认复用 `.env.online.local` 中的公开连接配置，也可在 `.env.desktop.local` 覆盖：
 `VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`（公开 anon/publishable key）、`VITE_OSS_REGION`、`VITE_OSS_BUCKET`、`VITE_OSS_STS_URL`。
