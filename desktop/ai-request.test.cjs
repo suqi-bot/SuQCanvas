@@ -21,3 +21,18 @@ test('desktop AI transport rejects filesystem access and unsupported verbs', asy
   await assert.rejects(aiRequest({ url: 'file:///C:/secret', method: 'GET' }))
   await assert.rejects(aiRequest({ url: 'http://localhost', method: 'DELETE' }))
 })
+
+test('desktop AI transport aborts an in-flight request', async () => {
+  let received
+  const started = new Promise((resolve) => { received = resolve })
+  const server = http.createServer(() => received())
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const controller = new AbortController()
+    const pending = aiRequest({ url: `http://127.0.0.1:${server.address().port}/slow`, method: 'GET' }, controller.signal)
+    const rejected = assert.rejects(pending, { name: 'AbortError' })
+    await started
+    controller.abort()
+    await rejected
+  } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)) }
+})

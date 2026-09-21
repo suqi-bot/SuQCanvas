@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { MediaKind, SuqEdge, SuqNode } from '../types'
 import type { Viewport } from '@xyflow/react'
+import type { AiTask } from '../ai/taskTypes'
 
 /** 云端上传状态：上传中 / 失败（可重试）/ 已成功 */
 export type CloudUploadState = 'uploading' | 'failed' | 'done'
@@ -63,6 +64,7 @@ export const db = new Dexie('suqcanvas') as Dexie & {
   projects: EntityTable<ProjectRecord, 'id'>
   uploadCheckpoints: EntityTable<UploadCheckpointRecord, 'assetId'>
   desktopCloudLinks: EntityTable<DesktopCloudLink, 'localProjectId'>
+  aiTasks: EntityTable<AiTask, 'id'>
 }
 
 db.version(1).stores({
@@ -75,6 +77,7 @@ db.version(2).stores({
   uploadCheckpoints: 'assetId',
 })
 db.version(3).stores({ desktopCloudLinks: 'localProjectId' })
+db.version(4).stores({ aiTasks: 'id, projectId, owner, state, createdAt' })
 
 export async function requestPersistentStorage(): Promise<boolean> {
   try {
@@ -99,6 +102,9 @@ export async function gcAssets(): Promise<void> {
     }
   }
   const now = Date.now()
+  for (const task of await db.aiTasks.where('state').anyOf('ready', 'running', 'paused', 'error').toArray()) {
+    for (const node of task.resultNodes ?? []) if (node.data.assetId) referenced.add(node.data.assetId)
+  }
   const assets = await db.assets.toArray()
   for (const a of assets) {
     if (referenced.has(a.id)) {

@@ -3,6 +3,7 @@ import { db } from '../db/db'
 import { importProjectFile } from '../io/importExport'
 import { useProjectStore } from '../store/projectStore'
 import { toast, useUiStore } from '../store/uiStore'
+import { hasRunningAiTasks, prepareAiExit } from '../ai/generation'
 
 export function DesktopLifecycle() {
   const initialized = useProjectStore((s) => s.initialized)
@@ -22,6 +23,12 @@ export function DesktopLifecycle() {
     const stopClose = bridge.onBeforeClose(() => {
       void (async () => {
         if (useProjectStore.getState().busy) { bridge.closeReady(false); return }
+        if (hasRunningAiTasks()) {
+          if (!window.confirm('仍有 AI 图片正在生成。退出后将停止等待，已记录编号的 ComfyUI 任务可在下次打开时恢复；其他任务需检查服务端结果。确定退出？')) {
+            bridge.closeReady(false); return
+          }
+          await prepareAiExit()
+        }
         // Text nodes commit their draft on blur; include the final keystrokes when closing.
         if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
         await useProjectStore.getState().saveNow()

@@ -10,6 +10,8 @@ import { useLanStore } from '../../store/lanStore'
 import { clearLanEditing, setLanEditing } from '../../sync/lanClient'
 import { AiImageComposer } from '../../components/AiImageComposer'
 import { useAiStore } from '../../ai/store'
+import { useProjectStore } from '../../store/projectStore'
+import { aiJobKey } from '../../ai/taskTypes'
 
 const MAX_W = 480
 const MAX_H = 360
@@ -19,7 +21,8 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
   const onNodesChange = useCanvasStore((s) => s.onNodesChange)
   const openImageViewer = useUiStore((s) => s.openImageViewer)
   const aiNodeId = useUiStore((s) => s.aiNodeId)
-  const running = useAiStore((s) => !!s.jobs[props.id]?.running)
+  const projectId = useProjectStore((s) => s.projectId)
+  const running = useAiStore((s) => !!s.jobs[aiJobKey(projectId, props.id)]?.running)
   const lock = useLanStore((s) =>
     Object.values(s.editing).find((item) => item.nodeId === props.id && item.userId !== s.selfId),
   )
@@ -85,7 +88,7 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
             disabled={!!lock} onClick={() => useUiStore.getState().openAiNode(props.id)}>
             <span className="text-2xl text-sky-500">✦</span>
             <span>{running ? '正在后台生成…' : props.data.ai.status === 'error' ? '生成失败，点击重试' : 'AI 图片 · 点击输入生成需求'}</span>
-            <span className="line-clamp-3 text-xs text-mid">{props.data.ai.prompt}</span>
+            <span className="line-clamp-3 text-xs text-mid">{props.data.ai.draftPrompt ?? props.data.ai.prompt}</span>
           </button>}
           {/* 占位层:加载中脉动,图片到达后与图片交叉淡出 */}
           <div

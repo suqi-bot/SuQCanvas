@@ -12,6 +12,7 @@ import DesktopCloudSaveButton from '../desktop/DesktopCloudSaveButton'
 import { InsertMenuContent } from './InsertMenuContent'
 import { CanvasSearch } from './CanvasSearch'
 import { AiImagePanel } from './AiImagePanel'
+import { AiTaskPanel } from './AiTaskPanel'
 import {
   AlignBottomIcon,
   AlignCenterHIcon,
@@ -185,6 +186,7 @@ export function Toolbar() {
 
       <CanvasSearch />
       <AiImagePanel />
+      <AiTaskPanel />
       {IS_DESKTOP_BUILD && <DesktopCloudSaveButton projectId={projectId} />}
 
       <button
@@ -292,7 +294,7 @@ export function Toolbar() {
         </button>
       )}
 
-      {IS_LAN_BUILD && <LanPanel />}
+      {IS_LAN_BUILD && !IS_DESKTOP_BUILD && <LanPanel />}
 
       <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-edge2 p-0.5">
         <button type="button" title="缩小" className={btnCls} onClick={() => dispatchView('zoom-out')}>

@@ -1,7 +1,7 @@
 {
   "name": "suqcanvas",
   "private": true,
-  "version": "1.4.2",
+  "version": "1.4.3",
   "type": "module",
   "scripts": {
     "predev": "node scripts/copy-pdfjs-assets.mjs",

@@ -28,6 +28,7 @@ import {
   bufToB64,
   b64ToUint8,
   resolveLanUrl,
+  refreshLanProjects,
 } from './lanClient'
 
 // ws 的 WebSocket 与 DOM 类型不同，运行时行为兼容
@@ -116,6 +117,13 @@ function decodeChunks(parts: string[]): Uint8Array {
 }
 
 describe('本地项目同步到服务器', () => {
+  it('刷新在收到服务器项目列表后完成，并支持停止等待', async () => {
+    await expect(refreshLanProjects()).resolves.toBeUndefined()
+    const controller = new AbortController()
+    const pending = refreshLanProjects(controller.signal)
+    controller.abort()
+    await expect(pending).rejects.toThrow('刷新已取消')
+  })
   const project: ProjectRecord = {
     id: 'local-sync-project', name: '本地素材项目', createdAt: 123, updatedAt: 456,
     graph: { nodes: [{ id: 'local-sync-node', position: { x: 1, y: 2 },

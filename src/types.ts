@@ -66,6 +66,10 @@ export const DEFAULT_EDGE_STYLE: EdgeStyle = {
 export interface SuqNodeData extends Record<string, unknown> {
   ai?: {
     prompt: string
+    draftPrompt?: string
+    parameterSource?: 'original' | 'current'
+    serviceUrl?: string
+    generationId?: string
     provider: string
     model: string
     size: string

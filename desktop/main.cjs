@@ -131,7 +131,23 @@ else {
       return true
     })
     ipcMain.handle('desktop:show-data', async (event) => { trusted(event); return shell.openPath(app.getPath('userData')) })
-    ipcMain.handle('desktop:ai-request', async (event, request) => { trusted(event); return aiRequest(request) })
+    const aiRequests = new Map()
+    ipcMain.handle('desktop:ai-request', async (event, request) => {
+      trusted(event)
+      const id = `${event.sender.id}:${request.requestId}`
+      const controller = new AbortController()
+      aiRequests.set(id, controller)
+      try { return await aiRequest(request, controller.signal) }
+      finally { if (aiRequests.get(id) === controller) aiRequests.delete(id) }
+    })
+    ipcMain.on('desktop:ai-cancel', (event, requestId) => {
+      trusted(event)
+      aiRequests.get(`${event.sender.id}:${requestId}`)?.abort()
+    })
+    window.webContents.once('destroyed', () => {
+      for (const controller of aiRequests.values()) controller.abort()
+      aiRequests.clear()
+    })
     const openProject = async () => {
       const result = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [{ name: 'SuQCanvas 项目', extensions: ['sqcanvas'] }] })
       pendingFiles.push(...result.filePaths)

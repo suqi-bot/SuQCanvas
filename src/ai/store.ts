@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { AiTask } from './taskTypes'
 
 const STORAGE = 'suqcanvas-ai-settings-v1'
 const defaults = { provider: 'comfy', comfyUrl: 'http://127.0.0.1:8188', cloudUrl: '', model: '',
@@ -19,6 +20,8 @@ interface AiState {
   llmKey: string
   settingsOpen: boolean
   jobs: Record<string, { message: string; error?: string; running: boolean }>
+  tasks: AiTask[]
+  setTask: (task: AiTask) => void
   setSettings: (settings: Partial<AiSettings>) => void
   setCredentials: (credentials: Partial<Pick<AiState, 'comfyKey' | 'cloudKey' | 'llmKey'>>) => void
   setSettingsOpen: (open: boolean) => void
@@ -27,7 +30,8 @@ interface AiState {
 
 // Credentials and active jobs are deliberately memory-only, independent of any popup lifetime.
 export const useAiStore = create<AiState>((set) => ({
-  settings: loadSettings(), comfyKey: '', cloudKey: '', llmKey: '', settingsOpen: false, jobs: {},
+  settings: loadSettings(), comfyKey: '', cloudKey: '', llmKey: '', settingsOpen: false, jobs: {}, tasks: [],
+  setTask: (task) => set((s) => ({ tasks: [task, ...s.tasks.filter((t) => t.id !== task.id)] })),
   setSettings: (settings) => set((s) => ({ settings: { ...s.settings, ...settings } })),
   setCredentials: (credentials) => set(credentials),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),

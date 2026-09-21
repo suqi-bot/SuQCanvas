@@ -1,3 +1,4 @@
+import { abortable, pause } from './abort'
 export type Workflow = Record<string, { class_type: string; inputs: Record<string, unknown>; _meta?: { title?: string } }>
 export interface Binding { node: string; input: string }
 export interface Endpoint { url: string; key?: string; model?: string }
@@ -14,20 +15,27 @@ function decode(value: string) {
   return Uint8Array.from(atob(value), (c) => c.charCodeAt(0))
 }
 
-export async function request(url: string, key = '', body?: unknown): Promise<Response> {
+export async function request(url: string, key = '', body?: unknown, signal?: AbortSignal): Promise<Response> {
+  signal?.throwIfAborted()
   const method = body === undefined ? 'GET' : 'POST'
   const json = body === undefined ? undefined : JSON.stringify(body)
   let response: Response
   if (typeof window !== 'undefined' && window.suqDesktop?.aiRequest) {
-    const result = await window.suqDesktop.aiRequest({ url, key, method, body: json })
+    const requestId = crypto.randomUUID()
+    const cancel = () => window.suqDesktop?.cancelAiRequest?.(requestId)
+    signal?.addEventListener('abort', cancel, { once: true })
+    let result
+    try { result = await abortable(window.suqDesktop.aiRequest({ requestId, url, key, method, body: json }), signal) }
+    finally { signal?.removeEventListener('abort', cancel) }
     response = new Response(decode(result.base64), { status: result.status, headers: { 'Content-Type': result.contentType } })
   } else {
     const target = import.meta.env.DEV ? url.replace(/^http:\/\/127\.0\.0\.1:8188(?=\/|$)/, '/ai-comfy') : url
     try {
       response = await fetch(target, { method, body: json, credentials: 'omit', redirect: 'error',
         headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), ...(json ? { 'Content-Type': 'application/json' } : {}) },
-        signal: AbortSignal.timeout(180000) })
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000) })
     } catch {
+      signal?.throwIfAborted()
       throw new Error('连接失败或超时。请检查地址与服务状态；网页版需要服务允许 CORS，HTTPS 页面不能连接 HTTP 服务。也可使用桌面版。')
     }
   }
@@ -79,17 +87,25 @@ export async function recentWorkflow(endpoint: Endpoint): Promise<Workflow> {
 }
 
 export async function generateComfy(endpoint: Endpoint, workflow: Workflow, binding: Binding, prompt: string,
-  signal: AbortSignal, status: (value: string) => void, prepared = false): Promise<Blob[]> {
+  signal: AbortSignal, status: (value: string) => void, prepared = false,
+  submitted?: (id: string) => Promise<void>): Promise<Blob[]> {
   signal.throwIfAborted()
   const url = baseUrl(endpoint.url)
-  const result = await (await request(`${url}/prompt`, endpoint.key, { prompt: prepareWorkflow(workflow, binding, prompt, !prepared) })).json()
+  const result = await (await request(`${url}/prompt`, endpoint.key, { prompt: prepareWorkflow(workflow, binding, prompt, !prepared) }, signal)).json()
   if (!result.prompt_id || Object.keys(result.node_errors ?? {}).length) throw new Error(`工作流校验失败：${JSON.stringify(result.node_errors ?? result.error)}`)
   const id = result.prompt_id as string
+  await submitted?.(id)
+  return waitForComfy(endpoint, id, signal, status)
+}
+
+export async function waitForComfy(endpoint: Endpoint, id: string, signal: AbortSignal,
+  status: (value: string) => void): Promise<Blob[]> {
+  const url = baseUrl(endpoint.url)
   status(`已提交 ${id}，等待 ComfyUI 生成…`)
   const deadline = Date.now() + 30 * 60 * 1000
   while (Date.now() < deadline) {
     signal.throwIfAborted()
-    const history: Record<string, HistoryEntry> = await (await request(`${url}/history/${encodeURIComponent(id)}`, endpoint.key)).json()
+    const history: Record<string, HistoryEntry> = await (await request(`${url}/history/${encodeURIComponent(id)}`, endpoint.key, undefined, signal)).json()
     const entry = history[id]
     if (entry?.status?.status_str === 'error') {
       throw new Error(entry.status.messages?.find(([type]) => type === 'execution_error')?.[1].exception_message || 'ComfyUI 执行失败，请查看服务端日志')
@@ -100,19 +116,19 @@ export async function generateComfy(endpoint: Endpoint, workflow: Workflow, bind
       const blobs: Blob[] = []
       for (const image of images) {
         signal.throwIfAborted()
-        blobs.push(await (await request(`${url}/view?${new URLSearchParams(image)}`, endpoint.key)).blob())
+        blobs.push(await (await request(`${url}/view?${new URLSearchParams(image)}`, endpoint.key, undefined, signal)).blob())
       }
       return blobs
     }
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await pause(1500, signal)
   }
   throw new Error(`等待超过 30 分钟，请在 ComfyUI 查看任务 ${id}；服务端任务可能仍在运行`)
 }
 
-export async function generateCompatible(endpoint: Endpoint, prompt: string, size: string): Promise<Blob[]> {
+export async function generateCompatible(endpoint: Endpoint, prompt: string, size: string, signal?: AbortSignal): Promise<Blob[]> {
   if (!endpoint.model?.trim()) throw new Error('请填写生图模型名称')
   const result = await (await request(`${baseUrl(endpoint.url)}/images/generations`, endpoint.key,
-    { model: endpoint.model.trim(), prompt, n: 1, size })).json()
+    { model: endpoint.model.trim(), prompt, n: 1, size }, signal)).json()
   if (!Array.isArray(result.data) || !result.data.length) throw new Error('接口没有返回 data 图片列表；请确认服务支持 Images API')
   return Promise.all(result.data.map(async (item: { b64_json?: string; url?: string }) => {
     if (item.b64_json) return new Blob([decode(item.b64_json)], { type: 'image/png' })
@@ -120,7 +136,7 @@ export async function generateCompatible(endpoint: Endpoint, prompt: string, siz
       const imageUrl = new URL(item.url)
       if (!['http:', 'https:'].includes(imageUrl.protocol)) throw new Error('图片地址必须为 HTTP(S)')
       // Signed image URLs must never receive the provider's API key.
-      return (await request(imageUrl.href)).blob()
+      return (await request(imageUrl.href, '', undefined, signal)).blob()
     }
     throw new Error('接口图片缺少 b64_json 或 url')
   }))

@@ -31,7 +31,7 @@ import { APP_VERSION } from '../appVersion'
 import { syncLocalProjectToLan } from '../sync/localProjectSync'
 import DesktopCloudSaveButton from '../desktop/DesktopCloudSaveButton'
 import { downloadLanProject } from '../sync/downloadLanProject'
-import { LanPanel } from './LanPanel'
+import { LanProjectPanel } from './LanProjectPanel'
 
 const DesktopCloudPanel = lazy(() => import('../desktop/DesktopCloudPanel'))
 
@@ -749,7 +749,6 @@ export function HomePage() {
               {IS_DESKTOP_BUILD ? '本地工作区' : lanName || '局域网协作'}
             </span>
           )}
-          {IS_DESKTOP_BUILD && <LanPanel />}
           {!IS_ONLINE_BUILD && !IS_DESKTOP_BUILD && (
             <button
               type="button"
@@ -887,7 +886,7 @@ export function HomePage() {
               </button>
             ))}
             <span className="w-full pt-1 text-xs leading-5 text-dim">
-              {desktopView === 'cloud' ? '连接原在线版账号' : desktopView === 'local' ? '保存在此电脑 · 手动上传服务器' : lanStatus === 'connected' ? '下载独立副本后离线编辑' : '点击右上角连接图标，填写服务器地址'}
+              {desktopView === 'cloud' ? '连接原在线版账号' : desktopView === 'local' ? '保存在此电脑 · 手动上传服务器' : lanStatus === 'connected' ? '下载独立副本后离线编辑' : '填写服务器地址和协作名称，连接局域网项目'}
             </span>
           </div>
         )}
@@ -896,6 +895,8 @@ export function HomePage() {
             <DesktopCloudPanel onDownloaded={async () => { await refresh(); setDesktopView('local') }} />
           </Suspense>
         ) : <>
+        {IS_DESKTOP_BUILD && desktopView === 'server' && <LanProjectPanel />}
+        {(!IS_DESKTOP_BUILD || desktopView !== 'server' || lanStatus === 'connected') && <>
         <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="mr-auto text-sm font-medium text-soft">
           {IS_DESKTOP_BUILD ? desktopView === 'local' ? '本地项目' : '服务器项目' : '全部项目'}（{visibleProjects.length}）
@@ -1042,6 +1043,7 @@ export function HomePage() {
             ))}
           </div>
         )}
+        </>}
         </>}
       </div>
 

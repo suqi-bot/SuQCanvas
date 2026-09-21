@@ -7,6 +7,7 @@ import type { Viewport } from '@xyflow/react'
 import { getLanUserColor } from './lanColors'
 import { getDeviceId } from '../utils/deviceId'
 import { IS_DESKTOP_BUILD } from '../buildMode'
+import { rememberLanServer } from './lanHistory'
 
 // 分片大小取 3 的倍数，使每个分片的 base64 都对齐到字节边界，
 // 各分片无填充 base64 拼接后才能精确还原原始数据
@@ -297,6 +298,7 @@ export function lanConnect(url: string, name: string, opts: { isReconnect?: bool
     reconnectAttempts = 0
     try {
       localStorage.setItem(LAN_STORAGE_KEY, JSON.stringify({ url: resolvedUrl, name }))
+      rememberLanServer(resolvedUrl, name)
     } catch {
       // 忽略存储失败
     }
@@ -771,6 +773,27 @@ export function initLanSync(): () => void {
 export async function broadcastLocalProjects(): Promise<void> {
   if (!isLanConnected()) return
   send({ t: 'project-list-request' })
+}
+
+/** Await a fresh server list instead of treating a sent request as a completed refresh. */
+export function refreshLanProjects(signal?: AbortSignal): Promise<void> {
+  if (!isLanConnected()) return Promise.reject(new Error('局域网未连接'))
+  return new Promise((resolve, reject) => {
+    let unsubscribe = () => {}
+    const finish = (error?: Error) => {
+      clearTimeout(timer); unsubscribe(); signal?.removeEventListener('abort', abort)
+      if (error) reject(error); else resolve()
+    }
+    const abort = () => finish(new Error('刷新已取消'))
+    const timer = setTimeout(() => finish(new Error('刷新超时，请检查服务器后重试')), 10000)
+    unsubscribe = useLanStore.subscribe((state, previous) => {
+      if (state.status !== 'connected') finish(new Error('连接已断开，请重新连接'))
+      else if (state.remoteProjects !== previous.remoteProjects) finish()
+    })
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) { abort(); return }
+    send({ t: 'project-list-request' })
+  })
 }
 
 /** 加入一个项目房间；实时画布、视口和素材只在该项目内传输。 */
