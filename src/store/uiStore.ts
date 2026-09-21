@@ -16,6 +16,8 @@ export interface ToastItem {
 }
 
 interface UiState {
+  aiNodeId: string | null
+  openAiNode: (id: string | null) => void
   busyMessage: string
   toasts: ToastItem[]
   pushToast: (message: string, kind?: ToastKind) => void
@@ -48,6 +50,8 @@ interface UiState {
 let toastId = 0
 
 export const useUiStore = create<UiState>((set, get) => ({
+  aiNodeId: null,
+  openAiNode: (aiNodeId) => set({ aiNodeId }),
   busyMessage: '',
   toasts: [],
   pushToast: (message, kind = 'info') => {

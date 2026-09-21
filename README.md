@@ -49,7 +49,7 @@ npm run desktop          # 构建并启动桌面应用
 npm run package:desktop  # 构建 Windows x64 安装程序 -> release/desktop/
 ```
 
-应用名称为「SuQCanvas 桌面版」，当前版本 1.4.1。安装程序为 `release/desktop/SuQCanvas-Desktop-1.4.1-Setup-x64.exe`，支持选择安装位置、桌面快捷方式和 `.sqcanvas` 文件关联。
+应用名称为「SuQCanvas 桌面版」，当前版本 1.4.2。安装程序为 `release/desktop/SuQCanvas-Desktop-1.4.2-Setup-x64.exe`，支持选择安装位置、桌面快捷方式和 `.sqcanvas` 文件关联。
 本地开发若安装环境跳过依赖的安装脚本，先运行 `node node_modules/electron/install.js` 下载 Electron 运行时。
 
 - **本地项目**：自动保存在 `%APPDATA%\SuQCanvas\` 下的应用 IndexedDB 中，项目包含原始素材；安装目录与数据目录分离，更新应用保留数据。

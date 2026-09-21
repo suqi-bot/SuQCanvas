@@ -21,6 +21,8 @@ interface ShellProps {
   node: NodeProps<SuqNode>
   children: ReactNode
   showBar?: boolean
+  /** 图片信息浮在节点外，不参与内容高度分配。 */
+  floatingBar?: boolean
   /** 底部名称栏始终显示（不依赖选中态） */
   alwaysShowBar?: boolean
   /** 插入者角标始终显示（不依赖悬停/选中） */
@@ -33,6 +35,7 @@ export const MediaNodeShell = memo(function MediaNodeShell({
   node,
   children,
   showBar = true,
+  floatingBar = false,
   alwaysShowBar = false,
   alwaysShowCreator = false,
   progress,
@@ -52,7 +55,7 @@ export const MediaNodeShell = memo(function MediaNodeShell({
 
   return (
     <div
-      className={`media-shell group relative flex h-full w-full flex-col overflow-hidden rounded-xl border bg-[var(--nodebg)] shadow-lg ${
+      className={`media-shell group relative flex h-full w-full flex-col rounded-xl border bg-[var(--nodebg)] shadow-lg ${floatingBar ? 'sq-image-shell overflow-visible' : 'overflow-hidden'} ${
         selected ? 'sq-selected' : ''
       }`}
       style={{ borderColor: data.borderColor ?? '#64748b' }}
@@ -104,23 +107,26 @@ export const MediaNodeShell = memo(function MediaNodeShell({
         </span>
       ))}
 
-      <div className="min-h-0 flex-1">{children}</div>
+      <div className={`min-h-0 flex-1 ${floatingBar ? 'overflow-hidden rounded-[inherit]' : ''}`}>{children}</div>
 
       {showBar && (selected || alwaysShowBar) && (
         <div
-          className="flex h-7 shrink-0 items-center gap-1.5 border-t bg-[var(--nodebar)] px-2"
-          style={{ borderColor: 'var(--nodebarline)' }}
+          className={floatingBar
+            ? 'absolute left-0 top-full mt-2 flex h-6 w-full items-center gap-1.5 rounded-md bg-panel/90 px-2 backdrop-blur-sm'
+            : 'flex h-7 shrink-0 items-center gap-1.5 border-t bg-[var(--nodebar)] px-2'}
+          style={floatingBar ? undefined : { borderColor: 'var(--nodebarline)' }}
         >
           <span className="text-mid">
             <KindIcon kind={data.kind} />
           </span>
-          <span className="truncate text-xs text-soft" title={data.label}>
+          <span className="min-w-0 flex-1 truncate text-xs text-soft" title={data.label}>
             {data.label ?? ''}
           </span>
+          {floatingBar && data.createdByName && <span className="max-w-[35%] truncate text-[10px] text-dim" title={`由 ${data.createdByName} 插入`}>{data.createdByName}</span>}
         </div>
       )}
 
-      {data.createdByName && (hovered || selected || alwaysShowCreator) && (
+      {!floatingBar && data.createdByName && (hovered || selected || alwaysShowCreator) && (
         <span
           className="pointer-events-none absolute bottom-1.5 right-1.5 max-w-[70%] truncate rounded bg-panel/90 px-1.5 py-0.5 text-[10px] text-dim shadow"
           title={`由 ${data.createdByName} 插入`}

@@ -9,7 +9,7 @@ import { exportCurrentProject } from '../io/importExport'
 import { LanPanel } from './LanPanel'
 import { IS_LAN_BUILD, IS_DESKTOP_BUILD } from '../buildMode'
 import DesktopCloudSaveButton from '../desktop/DesktopCloudSaveButton'
-import { STICKY_COLORS } from '../types'
+import { InsertMenuContent } from './InsertMenuContent'
 import { CanvasSearch } from './CanvasSearch'
 import { AiImagePanel } from './AiImagePanel'
 import {
@@ -27,16 +27,12 @@ import {
   DragIcon,
   FileIcon,
   FitIcon,
-  HeadingIcon,
   HomeIcon,
   MoonIcon,
   PlusIcon,
   RedoIcon,
   SelectIcon,
-  ShapeIcon,
-  StickyIcon,
   SunIcon,
-  TextIcon,
   UndoIcon,
   ZoomInIcon,
   ZoomOutIcon,
@@ -48,26 +44,6 @@ const STATUS_LABEL: Record<SaveStatus, { text: string; cls: string }> = {
   saved: { text: '已保存', cls: 'text-emerald-500' },
   error: { text: '保存失败', cls: 'text-rose-500' },
 }
-
-type InsertKind = 'text' | 'heading' | 'sticky' | 'shape'
-
-interface InsertItem {
-  kind: InsertKind
-  label: string
-  level?: 1 | 2 | 3
-  shape?: 'rect' | 'ellipse'
-  icon: (props: React.SVGProps<SVGSVGElement>) => React.ReactNode
-}
-
-const INSERT_ITEMS: InsertItem[] = [
-  { kind: 'text', label: '文本', icon: TextIcon },
-  { kind: 'heading', level: 1, label: '标题 1', icon: HeadingIcon },
-  { kind: 'heading', level: 2, label: '标题 2', icon: HeadingIcon },
-  { kind: 'heading', level: 3, label: '标题 3', icon: HeadingIcon },
-  { kind: 'sticky', label: '便签', icon: StickyIcon },
-  { kind: 'shape', shape: 'rect', label: '矩形', icon: ShapeIcon },
-  { kind: 'shape', shape: 'ellipse', label: '椭圆', icon: ShapeIcon },
-]
 
 const ALIGN_BUTTONS: { mode: AlignMode; title: string; icon: (props: React.SVGProps<SVGSVGElement>) => React.ReactNode }[] = [
   { mode: 'left', title: '左对齐', icon: AlignLeftIcon },
@@ -244,47 +220,7 @@ export function Toolbar() {
             className="fixed z-[80] w-44 rounded-lg border border-edge bg-panel p-1 shadow-2xl"
             style={{ left: menuPosition.left, top: menuPosition.top }}
           >
-            {INSERT_ITEMS.map((item) => (
-              <div key={`${item.kind}-${item.level ?? item.shape ?? ''}`}>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-soft hover:bg-hover hover:text-main"
-                  onClick={() => {
-                    dispatchAddNode({
-                      kind: item.kind,
-                      level: item.level,
-                      shape: item.shape,
-                    })
-                    setMenuOpen(false)
-                  }}
-                >
-                  <span className="text-mid">
-                    <item.icon />
-                  </span>
-                  {item.label}
-                </button>
-                {item.kind === 'sticky' && (
-                  <div className="flex items-center gap-1.5 pl-8 pb-1.5">
-                    {(Object.keys(STICKY_COLORS) as (keyof typeof STICKY_COLORS)[]).map((key) => (
-                      <button
-                        key={key}
-                        type="button"
-                        title={`${key}便签`}
-                        className="h-3.5 w-3.5 rounded-full border"
-                        style={{
-                          backgroundColor: STICKY_COLORS[key].bg,
-                          borderColor: STICKY_COLORS[key].border,
-                        }}
-                        onClick={() => {
-                          dispatchAddNode({ kind: 'sticky', color: key })
-                          setMenuOpen(false)
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
+            <InsertMenuContent onInsert={(item) => { dispatchAddNode(item); setMenuOpen(false) }} />
           </div>,
           document.body,
         )}

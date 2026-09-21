@@ -77,6 +77,11 @@ describe('导出/导入往返', () => {
     })
 
     const nodes = [makeImageNode('n1', 'a1'), makeTextNode('n2')]
+    nodes[0].data.ai = {
+      prompt: '雨后街道', provider: 'comfy', model: '', size: '',
+      workflow: JSON.stringify({ sampler: { class_type: 'KSampler', inputs: { seed: 123, steps: 20 } } }),
+      binding: JSON.stringify({ node: 'text', input: 'prompt' }), status: 'done', generatedAt: 123456,
+    }
     const edges = [makeEdge('e1')]
     const viewport = { x: 12, y: 34, zoom: 0.8 }
 
@@ -96,6 +101,7 @@ describe('导出/导入往返', () => {
     expect(new Uint8Array(await asset!.blob.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3, 4]))
 
     const canvas = useCanvasStore.getState()
+    expect(canvas.nodes.find((n) => n.id === 'n1')?.data.ai).toEqual(nodes[0].data.ai)
     expect(canvas.nodes).toHaveLength(2)
     expect(canvas.edges).toHaveLength(1)
     expect(canvas.nodes.find((n) => n.id === 'n1')?.data.assetId).toBe('a1')

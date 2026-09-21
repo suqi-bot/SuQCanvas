@@ -201,6 +201,14 @@ export function createTextNode(position: XYPosition, autoEdit = false): SuqNode 
   }
 }
 
+export function createAiNode(position: XYPosition): SuqNode {
+  return {
+    id: genId('n'), type: 'image', position, width: 320, height: 240, selected: true,
+    data: { kind: 'image', label: 'AI 图片', borderColor: '#0ea5e9',
+      ai: { prompt: '', provider: '', model: '', size: '', workflow: '', binding: '', status: 'draft' } },
+  }
+}
+
 const HEADING_SIZE: Record<HeadingLevel, { width: number; height: number }> = {
   1: { width: 420, height: 64 },
   2: { width: 360, height: 56 },

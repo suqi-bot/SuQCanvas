@@ -64,6 +64,18 @@ export const DEFAULT_EDGE_STYLE: EdgeStyle = {
 }
 
 export interface SuqNodeData extends Record<string, unknown> {
+  ai?: {
+    prompt: string
+    provider: string
+    model: string
+    size: string
+    workflow: string
+    binding: string
+    randomSeed?: boolean
+    generatedAt?: number
+    status?: 'draft' | 'generating' | 'done' | 'error'
+    error?: string
+  }
   kind: MediaKind
   assetId?: string
   text?: string

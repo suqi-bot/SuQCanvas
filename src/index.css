@@ -234,6 +234,41 @@ body {
   box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.9);
 }
 
+.media-shell.sq-image-shell.sq-selected {
+  box-shadow: 0 0 0 1px #38bdf8;
+}
+
+.react-flow__resize-control.line.sq-image-resize-line {
+  border-color: transparent;
+}
+
+/* Small visible grips, generous transparent hit targets. NodeResizer handles zoom scaling. */
+.react-flow__resize-control.handle.sq-image-resize-handle {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  z-index: 5;
+}
+
+.sq-image-resize-handle::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border: 1.5px solid #0ea5e9;
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.sq-image-resize-handle:hover::after,
+.sq-image-resize-handle:active::after {
+  background: #38bdf8;
+  box-shadow: 0 0 0 3px rgb(56 189 248 / 18%);
+}
+
 .sq-connect-mode .react-flow__pane {
   cursor: crosshair;
 }

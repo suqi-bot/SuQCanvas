@@ -52,13 +52,13 @@ export function textBindings(workflow: Workflow): Binding[] {
     .map(([input]) => ({ node, input })))
 }
 
-export function prepareWorkflow(workflow: Workflow, binding: Binding, prompt: string): Workflow {
+export function prepareWorkflow(workflow: Workflow, binding: Binding, prompt: string, randomSeed = true): Workflow {
   const copy = structuredClone(workflow)
   if (!copy[binding.node] || typeof copy[binding.node].inputs[binding.input] !== 'string') throw new Error('请选择有效的提示词输入')
   copy[binding.node].inputs[binding.input] = prompt
   for (const node of Object.values(copy)) {
     for (const input of ['seed', 'noise_seed']) {
-      if (typeof node.inputs[input] === 'number') node.inputs[input] = Math.floor(Math.random() * 2 ** 48)
+      if (randomSeed && typeof node.inputs[input] === 'number') node.inputs[input] = Math.floor(Math.random() * 2 ** 48)
     }
   }
   return copy
@@ -79,10 +79,10 @@ export async function recentWorkflow(endpoint: Endpoint): Promise<Workflow> {
 }
 
 export async function generateComfy(endpoint: Endpoint, workflow: Workflow, binding: Binding, prompt: string,
-  signal: AbortSignal, status: (value: string) => void): Promise<Blob[]> {
+  signal: AbortSignal, status: (value: string) => void, prepared = false): Promise<Blob[]> {
   signal.throwIfAborted()
   const url = baseUrl(endpoint.url)
-  const result = await (await request(`${url}/prompt`, endpoint.key, { prompt: prepareWorkflow(workflow, binding, prompt) })).json()
+  const result = await (await request(`${url}/prompt`, endpoint.key, { prompt: prepareWorkflow(workflow, binding, prompt, !prepared) })).json()
   if (!result.prompt_id || Object.keys(result.node_errors ?? {}).length) throw new Error(`工作流校验失败：${JSON.stringify(result.node_errors ?? result.error)}`)
   const id = result.prompt_id as string
   status(`已提交 ${id}，等待 ComfyUI 生成…`)

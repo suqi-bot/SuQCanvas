@@ -22,6 +22,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { useLanStore } from '../store/lanStore'
 import {
   createHeadingNode,
+  createAiNode,
   createShapeNode,
   createStickyNode,
   createTextNode,
@@ -39,6 +40,7 @@ import {
 } from './alignment/alignGuides'
 import { useAlignmentGuideStore } from './alignment/alignmentGuideStore'
 import { InspectorPanel } from '../components/InspectorPanel'
+import { InsertMenuContent } from '../components/InsertMenuContent'
 import { GroupToolbar } from '../components/GroupToolbar'
 import { isNodeLockedByOther, sendLanCursor, setLanEditing, clearLanEditing } from '../sync/lanClient'
 import { writeSelectionToSystemClipboard } from './clipboard'
@@ -57,6 +59,7 @@ function BoardInner() {
     useReactFlow()
   const storeApi = useStoreApi()
   const [dragging, setDragging] = useState(false)
+  const [aiMenu, setAiMenu] = useState<{ x: number; y: number } | null>(null)
   const tool = useUiStore((s) => s.tool)
   const setTool = useUiStore((s) => s.setTool)
   const tempPanRef = useRef<ToolMode | null>(null)
@@ -290,9 +293,16 @@ function BoardInner() {
   useEffect(() => {
     const onAddNode = (e: Event) => {
       const detail = (e as CustomEvent).detail ?? {}
-      const pos = centerPosition()
+      const pos = detail.position ?? centerPosition()
       const store = useCanvasStore.getState()
       switch (detail.kind) {
+        case 'ai': {
+          const node = createAiNode(pos)
+          store.onNodesChange(store.nodes.filter((n) => n.selected).map((n) => ({ id: n.id, type: 'select', selected: false })))
+          store.addNodes([node])
+          useUiStore.getState().openAiNode(node.id)
+          break
+        }
         case 'heading':
           store.addNodes([createHeadingNode(pos, (detail.level as HeadingLevel) ?? 1, true)])
           break
@@ -408,7 +418,10 @@ function BoardInner() {
       nodesConnectable={tool !== 'drag'}
       connectOnClick={tool !== 'drag'}
       connectionRadius={tool === 'connect' ? 300 : 20}
-      onPaneClick={() => storeApi.setState({ connectionClickStartHandle: null })}
+      onPaneClick={() => { setAiMenu(null); useUiStore.getState().openAiNode(null); storeApi.setState({ connectionClickStartHandle: null }) }}
+      onNodeClick={(_event, node) => { setAiMenu(null); if (!isNodeLockedByOther(node.id)) useUiStore.getState().openAiNode(node.data.ai ? node.id : null) }}
+      onPaneContextMenu={(event) => { event.preventDefault(); setAiMenu({ x: event.clientX, y: event.clientY }) }}
+      onMoveStart={() => setAiMenu(null)}
       selectionMode={SelectionMode.Partial}
       zoomOnScroll
       zoomOnPinch
@@ -440,6 +453,16 @@ className={`${dragging ? 'sq-drag-active' : ''} ${
         bgColor={isLight ? '#f8fafc' : '#0f172a'}
       />
       <AlignmentGuides />
+      {aiMenu && <div role="menu" aria-label="插入内容" className="fixed z-50 w-44 rounded-lg border border-edge2 bg-panel p-1 shadow-xl"
+        onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}
+        style={{ left: Math.min(aiMenu.x, window.innerWidth - 180), top: Math.max(8, Math.min(aiMenu.y, window.innerHeight - 360)) }}
+        onKeyDown={(e) => { if (e.key === 'Escape') setAiMenu(null) }}>
+        <div className="px-2 py-1.5 text-xs text-mid">插入内容</div>
+        <InsertMenuContent onInsert={(item) => {
+          window.dispatchEvent(new CustomEvent('sq:add-node', { detail: { ...item, position: screenToFlowPosition(aiMenu) } }))
+          setAiMenu(null)
+        }} />
+      </div>}
       <GroupToolbar />
       {Object.values(cursors).filter((c) => c.userId !== selfId).map((cursor) => {
         const p = flowToScreenPosition({ x: cursor.x, y: cursor.y })

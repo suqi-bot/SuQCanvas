@@ -36,6 +36,14 @@ describe('AI clients', () => {
       failed: { prompt: [5, 'failed', {}], status: { status_str: 'error' } } })
     expect(await recentWorkflow({ url: 'http://example.com' })).toEqual(workflow)
   })
+  it('submits the saved workflow seed and parameters without randomizing them again', async () => {
+    const prepared = prepareWorkflow(workflow, binding, '固定参数', false)
+    expect(prepared['458'].inputs.seed).toBe(123)
+    const fetch = mockResponses({ prompt_id: 'id' }, { id: { status: { completed: true }, outputs: { image: { images: [{ filename: 'result.png', subfolder: '', type: 'output' }] } } } }, {})
+    await generateComfy({ url: 'http://example.com' }, prepared, binding, '固定参数', new AbortController().signal, () => {}, true)
+    expect(JSON.parse(fetch.mock.calls[0][1].body).prompt).toEqual(prepared)
+    expect(workflow['459:452'].inputs.prompt).toBe('原提示词')
+  })
   it('surfaces execution failures instead of polling forever', async () => {
     mockResponses({ prompt_id: 'id' }, { id: { status: { status_str: 'error', messages: [['execution_error', { exception_message: 'out of memory' }]] } } })
     await expect(generateComfy({ url: 'http://example.com' }, workflow, binding, 'prompt', new AbortController().signal, () => {})).rejects.toThrow('out of memory')

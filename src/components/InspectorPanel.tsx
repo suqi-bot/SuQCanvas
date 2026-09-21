@@ -34,6 +34,7 @@ import {
   TrashIcon,
 } from '../canvas/nodes/Icons'
 import { GroupInspectorSection } from './GroupInspectorSection'
+import { useUiStore } from '../store/uiStore'
 
 const PRESET_COLORS = ['#64748b', '#38bdf8', '#34d399', '#fbbf24', '#f472b6', '#f87171', '#a78bfa', '#0f172a']
 
@@ -499,6 +500,18 @@ export function InspectorPanel() {
               className="w-full rounded-md border border-edge2 bg-panel2 px-2 py-1.5 text-xs text-main outline-none focus:border-sky-500"
             />
           </Section>
+          {selectedEditableNodes.length === 1 && firstNode.data.ai && <Section title="AI 生成信息">
+            <div className="space-y-2 break-words text-xs text-soft">
+              <p className="whitespace-pre-wrap">{firstNode.data.ai.prompt || '尚未填写生成需求'}</p>
+              <p>服务：{firstNode.data.ai.provider === 'comfy' ? 'ComfyUI' : firstNode.data.ai.provider ? 'Images API' : '待配置'}</p>
+              {firstNode.data.ai.provider === 'compatible' && <p>模型：{firstNode.data.ai.model} · 尺寸：{firstNode.data.ai.size}</p>}
+              {firstNode.data.ai.generatedAt && <p>生成时间：{new Date(firstNode.data.ai.generatedAt).toLocaleString()}</p>}
+              {firstNode.data.ai.error && <p className="text-rose-500">{firstNode.data.ai.error}</p>}
+              {firstNode.data.ai.workflow && <details><summary className="cursor-pointer">工作流与实际参数</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-[10px]">{firstNode.data.ai.workflow}</pre></details>}
+              <button type="button" className="w-full rounded-md border border-edge2 px-2 py-2 hover:bg-hover"
+                onClick={() => useUiStore.getState().openAiNode(firstNode.id)}>编辑提示词 / 重新生成</button>
+            </div>
+          </Section>}
           <Section title="边框颜色">
             <ColorField
               value={firstNode.data.borderColor ?? '#64748b'}
