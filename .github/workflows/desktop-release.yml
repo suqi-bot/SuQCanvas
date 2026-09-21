@@ -25,6 +25,20 @@ jobs:
           }
       - run: npm ci
       - run: npm test
+      - name: Validate online service configuration
+        shell: pwsh
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_OSS_REGION: ${{ vars.VITE_OSS_REGION }}
+          VITE_OSS_BUCKET: ${{ vars.VITE_OSS_BUCKET }}
+          VITE_OSS_STS_URL: ${{ vars.VITE_OSS_STS_URL }}
+        run: |
+          $required = @('VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'VITE_OSS_REGION', 'VITE_OSS_BUCKET', 'VITE_OSS_STS_URL')
+          $missing = @($required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
+          if ($missing.Count -gt 0) {
+            throw "Release requires online service configuration. Set repository Actions variables: $($missing -join ', ')"
+          }
       - name: Build desktop
         run: npm run build:desktop
         env:
