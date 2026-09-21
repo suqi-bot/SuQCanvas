@@ -1,5 +1,6 @@
-import { baseUrl, generateComfy, generateCompatible, parseWorkflow, prepareWorkflow, waitForComfy } from './client'
+import { baseUrl, generateComfy, generateCompatible, parseWorkflow, prepareWorkflow, uploadComfyImage, waitForComfy, type Binding } from './client'
 import { abortable } from './abort'
+import { splitGrid } from './gridSplit'
 import { useAiStore, type AiSettings } from './store'
 import { aiJobKey, type AiTask } from './taskTypes'
 import { db } from '../db/db'
@@ -45,20 +46,21 @@ async function launch(task: AiTask, abort: AbortController, key: string, resume 
 export function generationSettings(ai: NonNullable<SuqNodeData['ai']>, settings: AiSettings): AiSettings {
   if (ai.parameterSource !== 'original' || !ai.provider) return { ...settings }
   return { ...settings, provider: ai.provider, model: ai.model, size: ai.size, workflow: ai.workflow,
-    binding: ai.binding, randomSeed: false,
+    binding: ai.binding, negativeBinding: ai.negativeBinding ?? '', negativePrompt: ai.negativePrompt ?? '', randomSeed: false,
     comfyUrl: ai.provider === 'comfy' ? ai.serviceUrl || settings.comfyUrl : settings.comfyUrl,
     cloudUrl: ai.provider === 'compatible' ? ai.serviceUrl || settings.cloudUrl : settings.cloudUrl }
 }
 function resultGraph(nodes: SuqNode[], task: AiTask): SuqNode[] | null {
   const node = nodes.find((n) => n.id === task.nodeId)
   if (!node || !task.resultNodes?.length) return null
-  if (node.data.ai?.generationId === task.id) return nodes
+  if (node.data.ai?.generationId === task.id || node.data.splitTaskId === task.id) return nodes
   if ((node.data.ai?.generatedAt ?? 0) > task.createdAt) return null
   const [first, ...rest] = task.resultNodes
   return [...nodes.map((n) => n.id === node.id ? { ...n, data: { ...n.data, ...first.data,
-    ai: { ...first.data.ai!, draftPrompt: n.data.ai?.draftPrompt, parameterSource: n.data.ai?.parameterSource } } } : n),
+    ai: first.data.ai ? { ...first.data.ai, draftPrompt: n.data.ai?.draftPrompt, draftNegativePrompt: n.data.ai?.draftNegativePrompt, parameterSource: n.data.ai?.parameterSource } : undefined } } : n),
     ...rest.filter((r) => !nodes.some((n) => n.id === r.id)).map((r, index) => ({ ...r, parentId: node.parentId,
-      position: { x: node.position.x + (index + 1) * 360, y: node.position.y } }))]
+      position: { x: node.position.x + (task.grid ? (index + 1) % task.grid.columns : index + 1) * 520,
+        y: node.position.y + (task.grid ? Math.floor((index + 1) / task.grid.columns) * 400 : 0) } }))]
 }
 
 /** Results are durable before application; never recreate a deleted project or node. */
@@ -76,7 +78,8 @@ export async function applyAiTask(taskId: string): Promise<void> {
         const asset = await putAsset(new File([blob], `AI-${task.id}-${index + 1}.${ext}`, { type: blob.type || 'image/png' }))
         const node = createNodeForAsset(asset, { x: 0, y: 0 })
         node.id = `ai-${task.id}-${index}`
-        node.data.ai = { ...task.info, generationId: task.id, status: 'done', generatedAt: task.updatedAt }
+        node.data.ai = task.grid ? undefined : { ...task.info, generationId: task.id, status: 'done', generatedAt: task.updatedAt }
+        if (task.grid) node.data.splitTaskId = task.id
         nodes.push(node)
       }
       if (!nodes.length) throw new Error('任务没有可用图片')
@@ -129,16 +132,26 @@ async function execute(task: AiTask, abort: AbortController, key: string, resume
     await persist(task)
     abort.signal.throwIfAborted()
     const endpoint = { url: task.serviceUrl, key, model: task.info.model }
-    const work = resume ? waitForComfy(endpoint, task.promptId!, abort.signal, progress)
+    if (!resume && task.sourceBlob && task.info.imageBinding) {
+      progress('正在上传拆图原图…')
+      const workflow = parseWorkflow(task.info.workflow)
+      const binding: Binding = JSON.parse(task.info.imageBinding)
+      if (typeof workflow[binding.node]?.inputs[binding.input] !== 'string') throw new Error('拆图工作流的图片输入无效')
+      workflow[binding.node].inputs[binding.input] = await uploadComfyImage(endpoint, task.sourceBlob, abort.signal)
+      task.info.workflow = JSON.stringify(workflow)
+      await persist(task)
+    }
+    const work = task.grid && task.sourceBlob ? splitGrid(task.sourceBlob, task.grid.rows, task.grid.columns, task.grid.gap, task.grid.margin, abort.signal)
+      : resume ? waitForComfy(endpoint, task.promptId!, abort.signal, progress)
       : task.info.provider === 'comfy'
-        ? generateComfy(endpoint, parseWorkflow(task.info.workflow), JSON.parse(task.info.binding), task.info.prompt,
-          abort.signal, progress, true, async (promptId) => { task.promptId = promptId; await persist(task) })
-        : generateCompatible(endpoint, task.info.prompt, task.info.size, abort.signal)
+        ? generateComfy(endpoint, parseWorkflow(task.info.workflow), JSON.parse(task.info.binding || '{}'), task.info.prompt,
+          abort.signal, progress, true, async (promptId) => { task.promptId = promptId; task.sourceBlob = undefined; await persist(task) })
+        : generateCompatible(endpoint, task.info.prompt, task.info.size, abort.signal, task.info.negativePrompt)
     const blobs = await abortable(work, abort.signal)
     abort.signal.throwIfAborted()
     for (const blob of blobs) { const bitmap = await createImageBitmap(blob); bitmap.close() }
     abort.signal.throwIfAborted()
-    task.blobs = blobs; task.state = 'ready'; task.message = '生成完成，正在保存到原项目'
+    task.blobs = blobs; task.sourceBlob = undefined; task.state = 'ready'; task.message = '生成完成，正在保存到原项目'
     await persist(task)
     await applyAiTask(task.id)
     toast(`「${task.projectName}」AI 图片生成完成，可在 AI 任务中查看`, 'success')
@@ -149,7 +162,7 @@ async function execute(task: AiTask, abort: AbortController, key: string, resume
     if (!abort.signal.aborted) toast(task.message, 'error')
   } finally { if (controllers.get(activeKey) === abort) controllers.delete(activeKey) }
 }
-export async function generateAiNode(id: string, prompt: string): Promise<void> {
+export async function generateAiNode(id: string, prompt: string, sourceBlob?: Blob): Promise<void> {
   const project = useProjectStore.getState()
   const keyId = aiJobKey(project.projectId, id)
   if (controllers.has(keyId) || !prompt.trim() || !project.projectId || project.busy) return
@@ -160,17 +173,24 @@ export async function generateAiNode(id: string, prompt: string): Promise<void> 
   try {
     const state = useAiStore.getState()
     const config = generationSettings(node.data.ai, state.settings)
+    const negativePrompt = node.data.ai.draftNegativePrompt ?? config.negativePrompt ?? ''
+    if (config.provider === 'comfy' && negativePrompt.trim() && !config.negativeBinding) throw new Error('请先在 AI 生图设置中绑定反向提示词输入')
     const serviceUrl = baseUrl(config.provider === 'comfy' ? config.comfyUrl : config.cloudUrl)
     const currentUrl = config.provider === 'comfy' ? state.settings.comfyUrl : state.settings.cloudUrl
     // A credential configured for one service must not be sent to another imported endpoint.
     if (serviceUrl !== baseUrl(currentUrl)) throw new Error('原图服务地址与当前设置不同，请先在 AI 生图设置中切换到原服务')
     const workflow = config.provider === 'comfy'
-      ? prepareWorkflow(parseWorkflow(config.workflow || '{}'), JSON.parse(config.binding || '{}'), prompt.trim(), config.randomSeed) : null
+      ? node.data.ai.imageBinding && !config.binding
+        ? config.negativeBinding ? prepareWorkflow(parseWorkflow(config.workflow), JSON.parse(config.negativeBinding), negativePrompt, config.randomSeed) : parseWorkflow(config.workflow)
+        : prepareWorkflow(parseWorkflow(config.workflow || '{}'), JSON.parse(config.binding || '{}'), prompt.trim(), config.randomSeed,
+        config.negativeBinding ? { binding: JSON.parse(config.negativeBinding), prompt: negativePrompt } : undefined) : null
     const key = config.provider === 'comfy' ? state.comfyKey : state.cloudKey
     const task: AiTask = { id: genUuid(), projectId: project.projectId, projectName: project.projectName,
-      nodeId: id, owner: aiOwner(), serviceUrl, needsKey: !!key, createdAt: Date.now(), updatedAt: Date.now(), state: 'running',
+      nodeId: id, owner: aiOwner(), serviceUrl, needsKey: !!key, sourceBlob, createdAt: Date.now(), updatedAt: Date.now(), state: 'running',
       message: '正在提交生成…', info: { prompt: prompt.trim(), provider: config.provider, model: config.model,
         size: config.size, workflow: workflow ? JSON.stringify(workflow) : '', binding: config.binding,
+        negativePrompt, negativeBinding: config.negativeBinding,
+        imageBinding: node.data.ai.imageBinding,
         randomSeed: config.randomSeed, serviceUrl } }
     await launch(task, abort, key)
   } catch (reason) {
@@ -183,6 +203,12 @@ export async function resumeAiTask(id: string): Promise<void> {
   const task = await db.aiTasks.get(id)
   if (!task || task.owner !== aiOwner() || controllers.has(jobKey(task))) return
   if (task.state === 'ready') { await applyAiTask(id); return }
+  if (task.grid && task.sourceBlob && task.state !== 'done') {
+    const abort = new AbortController(); controllers.set(jobKey(task), abort)
+    task.state = 'running'; task.message = '正在恢复网格拆图'
+    await launch(task, abort, '')
+    return
+  }
   if (!task.promptId || task.info.provider !== 'comfy' || task.state === 'done') return
   const state = useAiStore.getState()
   if (task.serviceUrl !== baseUrl(state.settings.comfyUrl)) { toast('请先切换到此任务的 ComfyUI 服务地址', 'error'); return }
@@ -191,6 +217,16 @@ export async function resumeAiTask(id: string): Promise<void> {
   controllers.set(jobKey(task), abort)
   task.state = 'running'; task.message = '正在恢复原任务，不会重复提交'
   await launch(task, abort, state.comfyKey, true)
+}
+export async function generateGridNode(id: string, sourceBlob: Blob, grid: NonNullable<AiTask['grid']>) {
+  const project = useProjectStore.getState()
+  if (!project.projectId || project.busy || controllers.has(aiJobKey(project.projectId, id))) return
+  const abort = new AbortController()
+  controllers.set(aiJobKey(project.projectId, id), abort)
+  await launch({ id: genUuid(), projectId: project.projectId, projectName: project.projectName, nodeId: id,
+    owner: aiOwner(), createdAt: Date.now(), updatedAt: Date.now(), state: 'running', message: '正在本地拆图…',
+    info: { prompt: `网格拆图 ${grid.rows} × ${grid.columns}`, provider: 'grid', model: '', size: '', workflow: '', binding: '' },
+    serviceUrl: '', needsKey: false, sourceBlob, grid }, abort, '')
 }
 let recovery: Promise<void> | undefined
 export function recoverAiTasks(): Promise<void> {
@@ -201,7 +237,7 @@ export function recoverAiTasks(): Promise<void> {
       if (controllers.has(jobKey(task))) continue
       if (task.state === 'running') {
         task.state = 'paused'
-        task.message = task.promptId ? '上次运行已中断，可恢复原任务' : '未记录服务端任务编号，请先检查服务端结果后再手动生成'
+        task.message = task.grid || task.promptId ? '上次运行已中断，可恢复原任务' : '未记录服务端任务编号，请先检查服务端结果后再手动生成'
         await persist(task)
         if (task.promptId && !task.needsKey && task.serviceUrl === useAiStore.getState().settings.comfyUrl.replace(/\/$/, '')) {
           void resumeAiTask(task.id).catch(() => {})

@@ -1,15 +1,16 @@
 import { memo, useEffect, useRef, useState } from 'react'
-import type { NodeProps } from '@xyflow/react'
+import { NodeResizer, type NodeProps } from '@xyflow/react'
 import type { SuqNode } from '../../types'
 import { useCanvasStore } from '../../store/canvasStore'
 import { MediaNodeShell } from './MediaNodeShell'
 import { buildTextStyle, V_JUSTIFY } from './textStyle'
 import { setLanEditing, clearLanEditing } from '../../sync/lanClient'
-import { ResizeHandles } from './ResizeHandles'
+import { useLanStore } from '../../store/lanStore'
 
 export const ShapeNode = memo(function ShapeNode(props: NodeProps<SuqNode>) {
   const { id, data, selected } = props
   const shape = data.shape ?? 'rect'
+  const locked = useLanStore((s) => Object.values(s.editing).some((item) => item.nodeId === id && item.userId !== s.selfId))
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const [editing, setEditing] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -44,15 +45,18 @@ export const ShapeNode = memo(function ShapeNode(props: NodeProps<SuqNode>) {
   const vJustify = V_JUSTIFY[data.textAlignV ?? 'middle']
 
   return (
-    <MediaNodeShell node={props}>
+    <>
+    <NodeResizer isVisible={selected && !editing && !locked} minWidth={48} minHeight={48}
+      lineClassName="sq-image-resize-line" handleClassName="sq-image-resize-handle"
+      onResizeStart={() => setLanEditing(id, data.label ?? '形状')} onResizeEnd={() => clearLanEditing()} />
+    <MediaNodeShell node={props} geometry={shape} showBar={false}>
       <div
-        className={`h-full w-full ${shape === 'rect' ? 'rounded-lg' : 'rounded-full'}`}
-        style={{ backgroundColor: data.fill ?? '#38bdf8' }}
-        onDoubleClick={() => setEditing(true)}
+        className="relative h-full w-full"
+        onDoubleClick={() => { if (!locked) setEditing(true) }}
       >
         <div
-          className="flex h-full w-full flex-col p-2"
-          style={{ justifyContent: vJustify }}
+          className="absolute flex flex-col overflow-hidden p-2"
+          style={{ inset: shape === 'ellipse' ? '14.645%' : 0, justifyContent: vJustify }}
         >
           {editing ? (
             <textarea
@@ -79,7 +83,7 @@ export const ShapeNode = memo(function ShapeNode(props: NodeProps<SuqNode>) {
           )}
         </div>
       </div>
-      {selected && !editing && <ResizeHandles nodeId={id} />}
     </MediaNodeShell>
+    </>
   )
 })

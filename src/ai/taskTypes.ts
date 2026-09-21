@@ -14,6 +14,8 @@ export interface AiTask {
   serviceUrl: string
   needsKey: boolean
   promptId?: string
+  sourceBlob?: Blob
+  grid?: { rows: number; columns: number; gap: number; margin: number }
   blobs?: Blob[]
   resultNodes?: SuqNode[]
 }

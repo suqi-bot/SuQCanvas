@@ -3,7 +3,8 @@ import type { AiTask } from './taskTypes'
 
 const STORAGE = 'suqcanvas-ai-settings-v1'
 const defaults = { provider: 'comfy', comfyUrl: 'http://127.0.0.1:8188', cloudUrl: '', model: '',
-  llmUrl: '', llmModel: '', size: '1024x1024', workflow: '', binding: '', randomSeed: true }
+  llmUrl: '', llmModel: '', size: '1024x1024', workflow: '', binding: '', negativeBinding: '', negativePrompt: '', randomSeed: true,
+  splitWorkflow: '', splitImageBinding: '', splitPromptBinding: '', splitNegativeBinding: '' }
 export type AiSettings = typeof defaults
 function loadSettings(): AiSettings {
   try {

@@ -6,7 +6,16 @@ async function aiRequest(request, signal) {
   const headers = {}
   if (request.key) headers.Authorization = `Bearer ${request.key}`
   if (request.body) headers['Content-Type'] = 'application/json'
-  const response = await fetch(url, { method: request.method, headers, body: request.body,
+  let body = request.body
+  if (request.upload) {
+    if (request.method !== 'POST' || request.body) throw new Error('无效的图片上传请求')
+    const bytes = Buffer.from(request.upload.base64, 'base64')
+    if (bytes.length > 32 * 1024 * 1024) throw new Error('拆图原图不能超过 32MB')
+    body = new FormData()
+    body.append('image', new Blob([bytes], { type: request.upload.type }), request.upload.name)
+    body.append('type', 'input')
+  }
+  const response = await fetch(url, { method: request.method, headers, body,
     redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000) })
   const chunks = []
   let size = 0

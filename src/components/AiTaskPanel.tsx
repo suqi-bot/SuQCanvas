@@ -67,7 +67,7 @@ export function AiTaskPanel() {
         <div className="mt-2 flex flex-wrap gap-3 text-sky-500">
           <button disabled={busy || !!working} onClick={() => void action(task.id, () => view(task))}>查看项目</button>
           {task.state === 'running' ? <button onClick={() => stopAiGeneration(task.nodeId, task.projectId)}>停止等待</button>
-            : task.promptId && !['ready', 'done'].includes(task.state) && <button onClick={() => void resumeAiTask(task.id).catch((error) => toast(String(error), 'error'))}>恢复等待</button>}
+            : (task.promptId || (task.grid && task.sourceBlob)) && !['ready', 'done'].includes(task.state) && <button onClick={() => void resumeAiTask(task.id).catch((error) => toast(String(error), 'error'))}>恢复等待</button>}
           {task.state === 'ready' && <button disabled={!!working || busy} onClick={() => void action(task.id, () => applyAiTask(task.id))}>重试写入</button>}
           {(task.blobs?.length || task.resultNodes?.length) ? <button disabled={!!working} onClick={() => void action(task.id, () => download(task))}>下载图片</button> : null}
         </div>

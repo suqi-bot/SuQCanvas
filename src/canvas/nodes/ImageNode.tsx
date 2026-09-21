@@ -12,6 +12,7 @@ import { AiImageComposer } from '../../components/AiImageComposer'
 import { useAiStore } from '../../ai/store'
 import { useProjectStore } from '../../store/projectStore'
 import { aiJobKey } from '../../ai/taskTypes'
+import { ImageSplitPanel } from '../../components/ImageSplitPanel'
 
 const MAX_W = 480
 const MAX_H = 360
@@ -29,6 +30,8 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
   const fittedRef = useRef(false)
   // 图片加载完成的淡入状态:局域网分片传输期间占位层缓闪,内容到达后跨淡入
   const [loaded, setLoaded] = useState(false)
+  const [splitOpen, setSplitOpen] = useState(false)
+  const overlayOpen = useUiStore((s) => !!(s.homeOpen || s.imageViewer || s.pdfViewer || s.fileManagerOpen || s.playerPage || s.markdownViewer))
   const filename = props.data.label ?? '图片'
 
   useEffect(() => {
@@ -64,6 +67,7 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
 
   return (
     <>
+      {splitOpen && url && !overlayOpen && <ImageSplitPanel nodeId={props.id} url={url} close={() => setSplitOpen(false)} />}
       <NodeResizer
         isVisible={props.selected && !lock}
         minWidth={48}
@@ -108,6 +112,7 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
           )}
         {props.data.ai && url && <span className="pointer-events-none absolute left-2 top-2 rounded bg-panel/90 px-2 py-1 text-xs text-sky-500">{running ? '✦ 生成中…' : '✦ AI'}</span>}
         <div className="nodrag absolute right-2 top-2 flex gap-1 rounded-md border border-edge bg-panel/90 p-1 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+          <button type="button" disabled={!url || !!lock} className="rounded p-1.5 text-xs text-soft hover:bg-hover disabled:opacity-35" onClick={(event) => { event.stopPropagation(); useUiStore.getState().openAiNode(null); setSplitOpen(true) }}>拆图</button>
           <button
             type="button"
             title="打开图片"

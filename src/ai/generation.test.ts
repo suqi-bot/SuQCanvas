@@ -191,3 +191,41 @@ it('keeps a separately saved draft when a generation result is applied', async (
   await applyAiTask('recover-task')
   expect(useCanvasStore.getState().nodes[0].data.ai).toMatchObject({ prompt: '恢复测试', draftPrompt: '下一次生成的草稿' })
 })
+
+it('uploads a split source, binds negative text, and retains the original image', async () => {
+  const source = node('source')
+  source.data.assetId = 'original-asset'
+  const target = node('one')
+  target.data.ai = { ...target.data.ai!, provider: 'comfy', parameterSource: 'original', serviceUrl: 'http://example.test',
+    workflow: JSON.stringify({ load: { class_type: 'LoadImage', inputs: { image: 'old.png' } }, negative: { class_type: 'CLIPTextEncode', inputs: { text: 'old' } } }),
+    imageBinding: JSON.stringify({ node: 'load', input: 'image' }), negativeBinding: JSON.stringify({ node: 'negative', input: 'text' }), draftNegativePrompt: '水印' }
+  useCanvasStore.setState({ nodes: [source, target] })
+  useAiStore.getState().setSettings({ comfyUrl: 'http://example.test' })
+  const fetch = vi.fn()
+  for (const value of [{ name: 'uploaded.png', subfolder: 'split' }, { prompt_id: 'split-id' },
+    { 'split-id': { status: { completed: true }, outputs: { layers: { images: [{ filename: 'layer.png', subfolder: '', type: 'output' }] } } } }, {}]) {
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify(value)))
+  }
+  vi.stubGlobal('fetch', fetch)
+  await generateAiNode('one', '拆图', new Blob(['original'], { type: 'image/png' }))
+  const submitted = JSON.parse(fetch.mock.calls[1][1].body).prompt
+  expect(submitted.load.inputs.image).toBe('split/uploaded.png')
+  expect(submitted.negative.inputs.text).toBe('水印')
+  expect(useCanvasStore.getState().nodes.find((n) => n.id === 'source')?.data.assetId).toBe('original-asset')
+  const saved = (await db.aiTasks.toArray())[0]
+  expect(saved.state).toBe('done')
+  expect(saved.sourceBlob).toBeUndefined()
+  expect(saved.info.negativePrompt).toBe('水印')
+})
+
+it('places grid outputs in rows without AI metadata and applies them idempotently', async () => {
+  await db.aiTasks.put(task({ state: 'ready', grid: { rows: 2, columns: 2, gap: 0, margin: 0 }, blobs: Array.from({ length: 4 }, () => new Blob(['cell'], { type: 'image/png' })) }))
+  await applyAiTask('recover-task')
+  const result = useCanvasStore.getState().nodes
+  expect(result.find((n) => n.id === 'one')?.data.ai).toBeUndefined()
+  expect(result.find((n) => n.id === 'ai-recover-task-2')?.position).toEqual({ x: 0, y: 400 })
+  await db.aiTasks.update('recover-task', { state: 'ready' })
+  await applyAiTask('recover-task')
+  expect(useCanvasStore.getState().nodes).toHaveLength(result.length)
+  expect(mocks.putAsset).toHaveBeenCalledTimes(4)
+})

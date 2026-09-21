@@ -67,6 +67,10 @@ export interface SuqNodeData extends Record<string, unknown> {
   ai?: {
     prompt: string
     draftPrompt?: string
+    negativePrompt?: string
+    draftNegativePrompt?: string
+    negativeBinding?: string
+    imageBinding?: string
     parameterSource?: 'original' | 'current'
     serviceUrl?: string
     generationId?: string

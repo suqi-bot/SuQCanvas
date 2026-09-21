@@ -503,6 +503,7 @@ export function InspectorPanel() {
           {selectedEditableNodes.length === 1 && firstNode.data.ai && <Section title="AI 生成信息">
             <div className="space-y-2 break-words text-xs text-soft">
               <p className="whitespace-pre-wrap">{firstNode.data.ai.prompt || '尚未填写生成需求'}</p>
+              {firstNode.data.ai.negativePrompt && <p className="whitespace-pre-wrap">反向提示词：{firstNode.data.ai.negativePrompt}</p>}
               <p>服务：{firstNode.data.ai.provider === 'comfy' ? 'ComfyUI' : firstNode.data.ai.provider ? 'Images API' : '待配置'}</p>
               {firstNode.data.ai.provider === 'compatible' && <p>模型：{firstNode.data.ai.model} · 尺寸：{firstNode.data.ai.size}</p>}
               {firstNode.data.ai.generatedAt && <p>生成时间：{new Date(firstNode.data.ai.generatedAt).toLocaleString()}</p>}

@@ -22,6 +22,27 @@ test('desktop AI transport rejects filesystem access and unsupported verbs', asy
   await assert.rejects(aiRequest({ url: 'http://localhost', method: 'DELETE' }))
 })
 
+test('desktop image upload sends multipart image bytes and input type', async () => {
+  let captured
+  const server = http.createServer(async (req, res) => {
+    const chunks = []
+    for await (const chunk of req) chunks.push(chunk)
+    captured = { headers: req.headers, body: Buffer.concat(chunks).toString() }
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify({ name: 'layer-source.png', subfolder: '' }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const response = await aiRequest({ url: `http://127.0.0.1:${server.address().port}/upload/image`, method: 'POST',
+      upload: { base64: Buffer.from('source-pixels').toString('base64'), name: 'source.png', type: 'image/png' } })
+    assert.equal(response.status, 200)
+    assert.match(captured.headers['content-type'], /^multipart\/form-data; boundary=/)
+    assert.match(captured.body, /name="image"; filename="source.png"/)
+    assert.match(captured.body, /source-pixels/)
+    assert.match(captured.body, /name="type"\r\n\r\ninput/)
+  } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)) }
+})
+
 test('desktop AI transport aborts an in-flight request', async () => {
   let received
   const started = new Promise((resolve) => { received = resolve })

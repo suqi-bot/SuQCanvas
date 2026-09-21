@@ -23,6 +23,8 @@ interface ShellProps {
   showBar?: boolean
   /** 图片信息浮在节点外，不参与内容高度分配。 */
   floatingBar?: boolean
+  /** 几何形状直接使用自身轮廓，不套媒体卡片。 */
+  geometry?: 'rect' | 'ellipse'
   /** 底部名称栏始终显示（不依赖选中态） */
   alwaysShowBar?: boolean
   /** 插入者角标始终显示（不依赖悬停/选中） */
@@ -36,6 +38,7 @@ export const MediaNodeShell = memo(function MediaNodeShell({
   children,
   showBar = true,
   floatingBar = false,
+  geometry,
   alwaysShowBar = false,
   alwaysShowCreator = false,
   progress,
@@ -55,10 +58,10 @@ export const MediaNodeShell = memo(function MediaNodeShell({
 
   return (
     <div
-      className={`media-shell group relative flex h-full w-full flex-col rounded-xl border bg-[var(--nodebg)] shadow-lg ${floatingBar ? 'sq-image-shell overflow-visible' : 'overflow-hidden'} ${
+      className={`media-shell group relative flex h-full w-full flex-col border ${geometry ? `sq-shape-shell sq-shape-${geometry} overflow-visible` : `rounded-xl bg-[var(--nodebg)] shadow-lg ${floatingBar ? 'sq-image-shell overflow-visible' : 'overflow-hidden'}`} ${
         selected ? 'sq-selected' : ''
       }`}
-      style={{ borderColor: data.borderColor ?? '#64748b' }}
+      style={{ borderColor: data.borderColor ?? '#64748b', ...(geometry ? { borderRadius: geometry === 'ellipse' ? '50%' : 0, backgroundColor: data.fill ?? '#38bdf8' } : {}) }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onPointerDownCapture={(event) => {
@@ -126,7 +129,7 @@ export const MediaNodeShell = memo(function MediaNodeShell({
         </div>
       )}
 
-      {!floatingBar && data.createdByName && (hovered || selected || alwaysShowCreator) && (
+      {!geometry && !floatingBar && data.createdByName && (hovered || selected || alwaysShowCreator) && (
         <span
           className="pointer-events-none absolute bottom-1.5 right-1.5 max-w-[70%] truncate rounded bg-panel/90 px-1.5 py-0.5 text-[10px] text-dim shadow"
           title={`由 ${data.createdByName} 插入`}

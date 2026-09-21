@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { baseUrl, parseWorkflow, recentWorkflow, request, textBindings, type Workflow } from '../ai/client'
 import { useAiStore, saveAiSettings, type AiSettings } from '../ai/store'
+import { SplitWorkflowSettings } from './SplitWorkflowSettings'
 
 const field = 'w-full rounded-md border border-edge2 bg-panel px-3 py-2 text-sm text-main'
 const button = 'rounded-md border border-edge2 px-3 py-2 text-xs text-soft hover:bg-hover disabled:opacity-40'
@@ -26,7 +27,9 @@ export function AiImagePanel() {
   function acceptWorkflow(value: Workflow) {
     const choices = textBindings(value)
     const selected = choices.find((item) => !/negative/i.test(item.input + ' ' + value[item.node]._meta?.title)) ?? choices[0]
-    setSettings({ workflow: JSON.stringify(value), binding: selected ? JSON.stringify(selected) : '' })
+    const negative = choices.find((item) => /negative|负向|反向/i.test(item.input + ' ' + value[item.node]._meta?.title))
+    setSettings({ workflow: JSON.stringify(value), binding: selected ? JSON.stringify(selected) : '',
+      negativeBinding: negative ? JSON.stringify(negative) : '', negativePrompt: negative ? String(value[negative.node].inputs[negative.input]) : '' })
   }
   async function run(action: () => Promise<void>) {
     if (busy) return
@@ -70,10 +73,15 @@ export function AiImagePanel() {
               {item.node} · {workflow![item.node]._meta?.title || workflow![item.node].class_type} · {item.input}
             </option>)}
           </select></label>}
+          {workflow && <label className="block text-xs">反向提示词输入<select className={field + ' mt-1'} value={settings.negativeBinding} onChange={(e) => update('negativeBinding', e.target.value)}>
+            <option value="">不替换，保留工作流原值</option>{bindings.map((item) => <option key={JSON.stringify(item)} value={JSON.stringify(item)} disabled={JSON.stringify(item) === settings.binding}>
+              {item.node} · {workflow![item.node]._meta?.title || workflow![item.node].class_type} · {item.input}
+            </option>)}
+          </select></label>}
           {workflow && <details className="rounded-md border border-edge2 p-3"><summary className="cursor-pointer text-sm">生成参数（模型、尺寸、步数、种子等）</summary>
             <label className="my-3 flex gap-2 text-xs"><input type="checkbox" checked={randomSeed} onChange={(e) => setRandomSeed(e.target.checked)} />每次随机种子（关闭后使用下方种子）</label>
             <div className="grid grid-cols-2 gap-3">{Object.entries(workflow).flatMap(([nodeId, node]) => Object.entries(node.inputs)
-              .filter(([input, value]) => ['number', 'string', 'boolean'].includes(typeof value) && JSON.stringify({ node: nodeId, input }) !== settings.binding)
+              .filter(([input, value]) => ['number', 'string', 'boolean'].includes(typeof value) && JSON.stringify({ node: nodeId, input }) !== settings.binding && JSON.stringify({ node: nodeId, input }) !== settings.negativeBinding)
               .map(([input, value]) => <label key={`${nodeId}.${input}`} className="text-xs">{node._meta?.title || node.class_type} · {nodeId} · {input}
                 <input className={field + ' mt-1'} type={typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'checkbox' : 'text'}
                   step="any" checked={typeof value === 'boolean' ? value : undefined} value={typeof value === 'boolean' ? undefined : String(value)}
@@ -92,6 +100,9 @@ export function AiImagePanel() {
             <label className="text-xs">图片尺寸<input className={field + ' mt-1'} placeholder="1024x1024 或 auto" value={settings.size} onChange={(e) => update('size', e.target.value)} /></label></div>
           <p className="text-xs text-mid">服务需支持 /images/generations，并返回 b64_json 或图片 URL；模型及尺寸请按服务商填写。</p>
         </>}
+        <label className="block text-xs">默认反向提示词<textarea className={field + ' mt-1'} value={settings.negativePrompt} onChange={(e) => update('negativePrompt', e.target.value)} placeholder="不希望出现的内容，例如：模糊、水印" /></label>
+        {settings.provider === 'compatible' && <p className="text-xs text-mid">填写反向提示词时会发送 negative_prompt 扩展字段，需要你的服务支持；不支持时请留空。</p>}
+        <SplitWorkflowSettings />
         <details className="rounded-md border border-edge2 p-3"><summary className="cursor-pointer text-sm">可选：AI 提示词优化</summary>
           <p className="my-3 text-xs text-mid">不需要额外 AI 也能生图。需要扩写描述时，可单独连接本地或云端文字模型；先预览，再决定是否采用。</p>
           <div className="space-y-3">

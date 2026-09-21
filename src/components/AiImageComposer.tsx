@@ -6,7 +6,7 @@ import { generateAiNode, generationSettings, stopAiGeneration } from '../ai/gene
 import { composerPosition } from '../ai/composerPosition'
 import { aiJobKey } from '../ai/taskTypes'
 import { useProjectStore } from '../store/projectStore'
-import { optimizePrompt } from '../ai/client'
+import { optimizePrompt, type OptimizedPrompts } from '../ai/client'
 import { useCanvasStore } from '../store/canvasStore'
 import { useUiStore } from '../store/uiStore'
 import type { SuqNodeData } from '../types'
@@ -25,10 +25,10 @@ export function AiImageComposer({ id, ai, visible, locked }: { id: string; ai: N
   const projectId = useProjectStore((s) => s.projectId)
   const job = useAiStore((s) => s.jobs[aiJobKey(projectId, id)])
   const [prompt, setPrompt] = useState(ai.draftPrompt ?? ai.prompt)
-  const [optimized, setOptimized] = useState('')
+  const [optimized, setOptimized] = useState<OptimizedPrompts | null>(null)
   const [optimizing, setOptimizing] = useState(false)
   const [error, setError] = useState('')
-  useEffect(() => { setPrompt(ai.draftPrompt ?? ai.prompt) }, [ai.prompt, ai.draftPrompt])
+  useEffect(() => { setPrompt(ai.draftPrompt ?? ai.prompt); setOptimized(null) }, [ai.prompt, ai.draftPrompt, ai.draftNegativePrompt, config.negativePrompt])
   useEffect(() => {
     const resize = () => setScreen({ width: window.innerWidth, height: window.innerHeight })
     window.addEventListener('resize', resize)
@@ -42,7 +42,7 @@ export function AiImageComposer({ id, ai, visible, locked }: { id: string; ai: N
   }, [shown])
   const busy = !!job?.running
   function edit(value: string) {
-    setPrompt(value); setOptimized(''); setError('')
+    setPrompt(value); setOptimized(null); setError('')
     const node = useCanvasStore.getState().nodes.find((n) => n.id === id)
     if (node?.data.ai) useCanvasStore.getState().updateNodeData(id, { ai: { ...node.data.ai, draftPrompt: value } })
   }
@@ -57,22 +57,37 @@ export function AiImageComposer({ id, ai, visible, locked }: { id: string; ai: N
       onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Escape') useUiStore.getState().openAiNode(null) }}>
       <div className="flex items-center justify-between px-1 text-xs text-mid"><span>{busy ? '✦ 正在后台生成，可继续编辑画布' : '✦ AI 图片'}</span>
         <button type="button" aria-label="关闭提示词输入框" className="rounded px-2 py-1 hover:bg-hover" onClick={() => useUiStore.getState().openAiNode(null)}>×</button></div>
-      <textarea aria-label="图片生成需求" placeholder="描述你想生成的画面…" value={prompt} disabled={busy || locked}
+      <textarea aria-label="图片生成需求" placeholder="描述你想生成的画面…" value={prompt} disabled={busy || locked || optimizing}
         className="nowheel mt-1 min-h-24 w-full resize-y border-0 bg-transparent px-1 py-2 text-sm outline-none disabled:opacity-60"
         onChange={(e) => edit(e.target.value)} onKeyDown={(e) => {
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.nativeEvent.isComposing && !busy && !locked && !optimizing) { e.preventDefault(); void generateAiNode(id, prompt) }
         }} />
+      <details className="mb-2 text-xs text-mid"><summary className="cursor-pointer">反向提示词</summary>
+        <textarea aria-label="反向提示词" placeholder="不希望出现的内容" disabled={busy || locked || optimizing}
+          className="nodrag mt-2 w-full resize-y rounded border border-edge2 bg-transparent p-2 text-main"
+          value={ai.draftNegativePrompt ?? config.negativePrompt ?? ''}
+          onChange={(e) => {
+            const current = useCanvasStore.getState().nodes.find((n) => n.id === id)?.data.ai
+            if (current) useCanvasStore.getState().updateNodeData(id, { ai: { ...current, draftNegativePrompt: e.target.value } })
+          }} />
+      </details>
       {optimized && <div className="mb-3 max-h-44 overflow-auto rounded-lg bg-hover p-3 text-xs">
-        <p className="whitespace-pre-wrap">{optimized}</p><button className="mt-2 text-sky-500" onClick={() => edit(optimized)}>采用优化提示词</button>
-        <button className="ml-4 text-mid" onClick={() => setOptimized('')}>保留原文</button>
+        <p className="mb-1 text-mid">正向提示词</p><p className="whitespace-pre-wrap">{optimized.prompt}</p>
+        <p className="mb-1 mt-3 text-mid">负面提示词</p><p className="whitespace-pre-wrap">{optimized.negativePrompt || '（留空）'}</p>
+        <button disabled={busy || locked || optimizing} className="mt-2 text-sky-500 disabled:opacity-40" onClick={() => {
+          const current = useCanvasStore.getState().nodes.find((n) => n.id === id)?.data.ai
+          if (current) useCanvasStore.getState().updateNodeData(id, { ai: { ...current, draftPrompt: optimized.prompt, draftNegativePrompt: optimized.negativePrompt } })
+          setPrompt(optimized.prompt); setOptimized(null); setError('')
+        }}>同时采用正向和负面提示词</button>
+        <button className="ml-4 text-mid" onClick={() => setOptimized(null)}>保留原文</button>
       </div>}
       <div className="flex items-center gap-2">
         <button type="button" title="AI 生图设置" className="rounded-full px-2 py-1 text-mid hover:bg-hover" onClick={() => useAiStore.getState().setSettingsOpen(true)}>⚙</button>
         <button type="button" className="rounded-lg px-2 py-1.5 text-xs text-soft hover:bg-hover disabled:opacity-40" disabled={busy || optimizing || locked || !prompt.trim()}
           onClick={async () => {
-            setOptimizing(true); setError('')
-            const { settings: config, llmKey } = useAiStore.getState()
-            try { setOptimized(await optimizePrompt({ url: config.llmUrl, key: llmKey, model: config.llmModel }, prompt)) }
+            setOptimizing(true); setError(''); setOptimized(null)
+            const { settings: llmConfig, llmKey } = useAiStore.getState()
+            try { setOptimized(await optimizePrompt({ url: llmConfig.llmUrl, key: llmKey, model: llmConfig.llmModel }, prompt, ai.draftNegativePrompt ?? config.negativePrompt ?? '')) }
             catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) }
             finally { setOptimizing(false) }
           }}>{optimizing ? '优化中…' : '✧ 优化提示词'}</button>
@@ -83,7 +98,7 @@ export function AiImageComposer({ id, ai, visible, locked }: { id: string; ai: N
             onClick={() => void generateAiNode(id, prompt)}>↑</button>}
       </div>
       {ai.generatedAt && <label className="mt-2 flex items-center gap-2 text-xs text-mid">生成参数
-        <select aria-label="生成参数来源" className="rounded border border-edge2 bg-panel px-2 py-1 text-soft" disabled={busy || locked} value={ai.parameterSource ?? 'current'} onChange={(e) => {
+        <select aria-label="生成参数来源" className="rounded border border-edge2 bg-panel px-2 py-1 text-soft" disabled={busy || locked || optimizing} value={ai.parameterSource ?? 'current'} onChange={(e) => {
           const current = useCanvasStore.getState().nodes.find((n) => n.id === id)?.data.ai
           if (current) useCanvasStore.getState().updateNodeData(id, { ai: { ...current, parameterSource: e.target.value as 'current' | 'original' } })
         }}><option value="current">使用当前设置</option><option value="original">沿用原图参数（固定种子）</option></select>

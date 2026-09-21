@@ -221,7 +221,7 @@ function drawNodePreview(
     if ((d.shape ?? 'rect') === 'ellipse') {
       ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2)
     } else {
-      ctx.roundRect(x, y, w, h, 2)
+      ctx.rect(x, y, w, h)
     }
     ctx.fill()
     ctx.stroke()

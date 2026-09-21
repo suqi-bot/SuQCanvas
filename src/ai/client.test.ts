@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { baseUrl, generateComfy, generateCompatible, optimizePrompt, parseWorkflow, prepareWorkflow, recentWorkflow, textBindings } from './client'
+import { baseUrl, generateComfy, generateCompatible, optimizePrompt, parseWorkflow, prepareWorkflow, recentWorkflow, textBindings, uploadComfyImage } from './client'
 
 const workflow = {
   '459:452': { class_type: 'TextEncodeQwenImage21', inputs: { prompt: '原提示词', negative_prompt: '模糊', clip: ['453', 0] } },
@@ -14,6 +14,31 @@ function mockResponses(...values: unknown[]) {
 }
 afterEach(() => vi.unstubAllGlobals())
 describe('AI clients', () => {
+  it('binds negative text separately and rejects colliding bindings', () => {
+    const negative = { binding: { node: '459:452', input: 'negative_prompt' }, prompt: '水印' }
+    const result = prepareWorkflow(workflow, binding, '猫', false, negative)
+    expect(result['459:452'].inputs.prompt).toBe('猫')
+    expect(result['459:452'].inputs.negative_prompt).toBe('水印')
+    expect(workflow['459:452'].inputs.negative_prompt).toBe('模糊')
+    expect(() => prepareWorkflow(workflow, binding, '猫', false, { binding, prompt: '' })).toThrow('同一个输入')
+    expect(prepareWorkflow(workflow, binding, '猫', false, { ...negative, prompt: '' })['459:452'].inputs.negative_prompt).toBe('')
+  })
+  it('only sends the optional negative_prompt extension when populated', async () => {
+    const fetch = mockResponses({ data: [{ b64_json: btoa('image') }] }, { data: [{ b64_json: btoa('image') }] })
+    const endpoint = { url: 'https://example.com/v1', model: 'image' }
+    await generateCompatible(endpoint, '猫', 'auto', undefined, '水印')
+    await generateCompatible(endpoint, '猫', 'auto')
+    expect(JSON.parse(fetch.mock.calls[0][1].body).negative_prompt).toBe('水印')
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).not.toHaveProperty('negative_prompt')
+  })
+  it('uploads the source image as multipart and uses the returned server filename', async () => {
+    const fetch = mockResponses({ name: 'renamed.png', subfolder: 'inputs' })
+    expect(await uploadComfyImage({ url: 'http://example.com', key: 'key' }, new Blob(['pixels'], { type: 'image/png' }), new AbortController().signal)).toBe('inputs/renamed.png')
+    const form = fetch.mock.calls[0][1].body as FormData
+    expect(await (form.get('image') as Blob).text()).toBe('pixels')
+    expect(form.get('type')).toBe('input')
+    expect(fetch.mock.calls[0][1].headers).not.toHaveProperty('Content-Type')
+  })
   it('validates base URLs and preserves provider path prefixes', () => {
     expect(baseUrl(' https://example.com/api/v1/ ')).toBe('https://example.com/api/v1')
     expect(() => baseUrl('file:///secret')).toThrow()
@@ -65,9 +90,21 @@ describe('AI clients', () => {
     await generateCompatible({ url: 'https://example.com/v1', key: 'test-key', model: 'image-model' }, 'x', 'auto')
     expect(fetch.mock.calls[1][1].headers).not.toHaveProperty('Authorization')
   })
-  it('returns optimized text and rejects empty responses', async () => {
-    mockResponses({ choices: [{ message: { content: '优化后的描述' } }] }, { choices: [] })
-    expect(await optimizePrompt({ url: 'http://example.com/v1', model: 'llm' }, '描述')).toBe('优化后的描述')
+  it('optimizes both prompts with existing negative constraints and rejects empty responses', async () => {
+    const fetch = mockResponses({ choices: [{ message: { content: JSON.stringify({ prompt: '优化后的描述', negativePrompt: '水印、模糊' }) } }] }, { choices: [] })
+    expect(await optimizePrompt({ url: 'http://example.com/v1', model: 'llm' }, '描述', '水印')).toEqual({ prompt: '优化后的描述', negativePrompt: '水印、模糊' })
+    expect(JSON.parse(JSON.parse(fetch.mock.calls[0][1].body).messages[1].content)).toEqual({ prompt: '描述', negativePrompt: '水印' })
     await expect(optimizePrompt({ url: 'http://example.com/v1', model: 'llm' }, '描述')).rejects.toThrow('没有返回文本')
+  })
+  it('generates negative text for a blank input and accepts fenced JSON', async () => {
+    const fetch = mockResponses({ choices: [{ message: { content: '```json\n{"prompt":"猫", "negativePrompt":"多余肢体、失焦"}\n```' } }] })
+    expect(await optimizePrompt({ url: 'http://example.com/v1', model: 'llm' }, '猫', '  ')).toEqual({ prompt: '猫', negativePrompt: '多余肢体、失焦' })
+    expect(JSON.parse(fetch.mock.calls[0][1].body).messages[0].content).toContain('必须根据正向需求同步生成')
+  })
+  it('rejects malformed or incomplete pairs instead of silently replacing negative text', async () => {
+    for (const content of ['描述', '{}', '{"prompt":"猫"}', '{"prompt":"", "negativePrompt":"模糊"}', '{"prompt":"猫", "negativePrompt":[]}', '{"prompt":"猫", "negativePrompt":"  "}']) {
+      mockResponses({ choices: [{ message: { content } }] })
+      await expect(optimizePrompt({ url: 'http://example.com/v1', model: 'llm' }, '猫', '水印')).rejects.toThrow('原提示词未修改')
+    }
   })
 })
