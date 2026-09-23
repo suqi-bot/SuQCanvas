@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { request as httpRequest, type IncomingHttpHeaders } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -71,6 +71,19 @@ async function connectWhenReady(url: string, timeoutMs = 5000): Promise<WebSocke
     }
   }
   throw new Error(`LAN test server did not become ready within ${timeoutMs}ms`)
+}
+
+async function waitForFile(path: string, timeoutMs = 10000): Promise<Buffer> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      return await readFile(path)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      await sleep(150)
+    }
+  }
+  return readFile(path)
 }
 
 let server: ChildProcess
@@ -479,11 +492,10 @@ describe('LAN 封面随资产同步', () => {
       file,
       thumb,
     )
-    await sleep(800)
     const key = createHash('sha256').update('asset-push-thumb').digest('hex')
-    const cached = await readFile(join(dataDir, 'assets', `${key}.thumb`))
+    const cached = await waitForFile(join(dataDir, 'assets', `${key}.thumb`))
     expect(Array.from(cached)).toEqual(Array.from(thumbBytes))
-    expect((await stat(join(dataDir, 'assets', `${key}.bin`))).size).toBe(file.size)
+    expect((await waitForFile(join(dataDir, 'assets', `${key}.bin`))).length).toBe(file.size)
   }, 20000)
 
   it('历史视频（中继无 .thumb）能由本地封面补推自愈', async () => {
@@ -507,8 +519,7 @@ describe('LAN 封面随资产同步', () => {
       thumbnail: new Blob([legacyThumb], { type: 'image/jpeg' }),
     })
     pushThumbnailToServer(legacy.id, (await db.assets.get(legacy.id))!.thumbnail!)
-    await sleep(600)
-    const cached = await readFile(thumbPath)
+    const cached = await waitForFile(thumbPath)
     expect(Array.from(cached)).toEqual(Array.from(legacyThumb))
   }, 20000)
 
