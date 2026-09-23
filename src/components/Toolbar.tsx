@@ -5,6 +5,7 @@ import { useProjectStore, type SaveStatus } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useCanvasStore, type AlignMode } from '../store/canvasStore'
 import { usePlayerStore } from '../store/playerStore'
+import { useNeteaseStore } from '../store/neteaseStore'
 import { exportCurrentProject } from '../io/importExport'
 import { LanPanel } from './LanPanel'
 import { IS_LAN_BUILD, IS_DESKTOP_BUILD } from '../buildMode'
@@ -30,6 +31,7 @@ import {
   FitIcon,
   HomeIcon,
   MoonIcon,
+  NeteaseIcon,
   PlusIcon,
   RedoIcon,
   SelectIcon,
@@ -106,6 +108,7 @@ export function Toolbar() {
   const hasAudio = track !== null
   const barVisible = usePlayerStore((s) => s.barVisible)
   const showCd = hasAudio && !barVisible
+  const neteaseOpen = useNeteaseStore((s) => s.open)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -188,6 +191,19 @@ export function Toolbar() {
       <AiImagePanel />
       <AiTaskPanel />
       {IS_DESKTOP_BUILD && <DesktopCloudSaveButton projectId={projectId} />}
+      <button
+        type="button"
+        title="打开网易云音乐面板（应用内登录与播放）"
+        className="flex shrink-0 items-center gap-1.5 rounded-md border border-edge2 px-2.5 py-1.5 text-xs text-soft hover:border-rose-500/50 hover:bg-hover hover:text-main"
+        onClick={() => {
+          const netease = useNeteaseStore.getState()
+          if (netease.open) netease.closePanel()
+          else void netease.openPanel(netease.target.type === 'home' ? null : netease.target)
+        }}
+      >
+        <NeteaseIcon className={neteaseOpen ? 'text-rose-500' : undefined} />
+        网易云
+      </button>
 
       <button
         type="button"

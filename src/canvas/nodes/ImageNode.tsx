@@ -19,6 +19,8 @@ const MAX_H = 360
 
 export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
   const url = useAssetUrl(props.data.assetId)
+  const editPreviewAssetId = props.data.ai?.editPreviewAssetId
+  const editPreviewUrl = useAssetUrl(editPreviewAssetId)
   const onNodesChange = useCanvasStore((s) => s.onNodesChange)
   const openImageViewer = useUiStore((s) => s.openImageViewer)
   const aiNodeId = useUiStore((s) => s.aiNodeId)
@@ -31,6 +33,7 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
   // 图片加载完成的淡入状态:局域网分片传输期间占位层缓闪,内容到达后跨淡入
   const [loaded, setLoaded] = useState(false)
   const [splitOpen, setSplitOpen] = useState(false)
+  const [comparePos, setComparePos] = useState(50)
   const overlayOpen = useUiStore((s) => !!(s.homeOpen || s.imageViewer || s.pdfViewer || s.fileManagerOpen || s.playerPage || s.markdownViewer))
   const filename = props.data.label ?? '图片'
 
@@ -65,6 +68,36 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
     ])
   }
 
+  function startCompareDrag(e: React.PointerEvent<HTMLDivElement>) {
+    if ((e.target as HTMLElement).closest('button')) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const update = (clientX: number) =>
+      setComparePos(Math.min(97, Math.max(3, ((clientX - rect.left) / rect.width) * 100)))
+    update(e.clientX)
+    const move = (event: PointerEvent) => update(event.clientX)
+    const stop = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop)
+  }
+
+  function applyEditPreview() {
+    const ai = props.data.ai
+    if (!ai?.editPreviewAssetId) return
+    useCanvasStore.getState().updateNodeData(props.id, {
+      assetId: ai.editPreviewAssetId,
+      ai: { ...ai, editPreviewAssetId: undefined },
+    })
+  }
+
+  function discardEditPreview() {
+    const ai = props.data.ai
+    if (!ai) return
+    useCanvasStore.getState().updateNodeData(props.id, { ai: { ...ai, editPreviewAssetId: undefined } })
+  }
+
   return (
     <>
       {splitOpen && url && !overlayOpen && <ImageSplitPanel nodeId={props.id} url={url} close={() => setSplitOpen(false)} />}
@@ -80,7 +113,7 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
       />
       <MediaNodeShell node={props} floatingBar>
       <div
-        className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[var(--well)] p-1.5"
+        className={`relative flex h-full w-full items-center justify-center overflow-hidden p-1.5 ${url ? 'sq-checker' : 'bg-[var(--well)]'}`}
         onClick={() => { if (props.data.ai && !lock) useUiStore.getState().openAiNode(props.id) }}
         onDoubleClick={(event) => {
           event.stopPropagation()
@@ -111,8 +144,30 @@ export const ImageNode = memo(function ImageNode(props: NodeProps<SuqNode>) {
             />
           )}
         {props.data.ai && url && <span className="pointer-events-none absolute left-2 top-2 rounded bg-panel/90 px-2 py-1 text-xs text-sky-500">{running ? '✦ 生成中…' : '✦ AI'}</span>}
+        {editPreviewUrl && url && (
+          <div
+            className="nodrag absolute inset-0 z-30 cursor-ew-resize select-none"
+            onPointerDown={startCompareDrag}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <div className="pointer-events-none absolute inset-0 sq-checker" style={{ clipPath: `inset(0 0 0 ${comparePos}%)` }}>
+              <img src={editPreviewUrl} alt="图生图结果" draggable={false}
+                className="absolute inset-0 h-full w-full rounded object-contain p-1.5" />
+            </div>
+            <div className="pointer-events-none absolute bottom-0 top-0 w-0.5 bg-white/90 shadow-[0_0_4px_rgba(0,0,0,.6)]" style={{ left: `${comparePos}%` }} />
+            <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">改前</span>
+            <span className="pointer-events-none absolute right-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">改后</span>
+            <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border border-edge bg-panel/95 px-2 py-1 text-xs shadow"
+              onPointerDown={(e) => e.stopPropagation()}>
+              <span className="text-mid">拖动对比</span>
+              <button type="button" className="rounded bg-sky-600 px-2 py-1 text-white hover:bg-sky-500" onClick={applyEditPreview}>应用</button>
+              <button type="button" className="rounded border border-edge2 px-2 py-1 text-soft hover:bg-hover" onClick={discardEditPreview}>放弃</button>
+            </div>
+          </div>
+        )}
         <div className="nodrag absolute right-2 top-2 flex gap-1 rounded-md border border-edge bg-panel/90 p-1 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-          <button type="button" disabled={!url || !!lock} className="rounded p-1.5 text-xs text-soft hover:bg-hover disabled:opacity-35" onClick={(event) => { event.stopPropagation(); useUiStore.getState().openAiNode(null); setSplitOpen(true) }}>拆图</button>
+          <button type="button" disabled={!url || !!lock} className="rounded p-1.5 text-xs text-soft hover:bg-hover disabled:opacity-35" onClick={(event) => { event.stopPropagation(); useUiStore.getState().openAiNode(null); setSplitOpen(true) }}>图生图</button>
           <button
             type="button"
             title="打开图片"

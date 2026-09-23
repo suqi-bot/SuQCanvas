@@ -32,6 +32,7 @@ function searchableFields(node: SuqNode): string[] {
   return [
     node.data.label,
     node.data.text,
+    node.data.negativePrompt,
     node.data.kind,
     node.data.mime,
     node.data.createdByName,

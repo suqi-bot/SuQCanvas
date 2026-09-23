@@ -23,15 +23,19 @@ import { useLanStore } from '../store/lanStore'
 import {
   createHeadingNode,
   createAiNode,
+  createNeteaseNode,
+  createPromptNode,
   createShapeNode,
   createStickyNode,
   createTextNode,
   importFiles,
 } from '../io/fileLoader'
+import { applyPromptConnection } from '../ai/promptLink'
 import type { HeadingLevel, ShapeType, StickyColor, SuqNode } from '../types'
 import { DEFAULT_EDGE_STYLE } from '../types'
 import { mediaNodeTypes } from './nodes/nodeTypes'
 import { styledEdgeTypes } from './edges/edgeTypes'
+import { NETEASE_DRAG_MIME, parseNeteaseDragPayload } from '../media/netease'
 import { AlignmentGuides } from './alignment/AlignmentGuides'
 import {
   computeAlignment,
@@ -54,6 +58,13 @@ function BoardInner() {
   const onNodesChange = useCanvasStore((s) => s.onNodesChange)
   const onEdgesChange = useCanvasStore((s) => s.onEdgesChange)
   const onConnect = useCanvasStore((s) => s.onConnect)
+  const handleConnect = useCallback(
+    (connection: Parameters<typeof onConnect>[0]) => {
+      onConnect(connection)
+      applyPromptConnection(connection)
+    },
+    [onConnect],
+  )
   const setViewport = useCanvasStore((s) => s.setViewport)
   const { screenToFlowPosition, flowToScreenPosition, setViewport: rfSetViewport, fitView, zoomIn, zoomOut, setCenter, getZoom } =
     useReactFlow()
@@ -257,7 +268,8 @@ function BoardInner() {
   }, [screenToFlowPosition])
 
   const onDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('Files')) {
+    const types = e.dataTransfer.types
+    if (types.includes('Files') || types.includes(NETEASE_DRAG_MIME)) {
       e.preventDefault()
       e.dataTransfer.dropEffect = 'copy'
       setDragging(true)
@@ -271,10 +283,23 @@ function BoardInner() {
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       setDragging(false)
+      const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const neteaseRaw = e.dataTransfer.getData(NETEASE_DRAG_MIME)
+      const neteaseSong = parseNeteaseDragPayload(neteaseRaw)
+      if (neteaseSong) {
+        e.preventDefault()
+        useCanvasStore.getState().addNodes([
+          createNeteaseNode(pos, {
+            id: neteaseSong.id,
+            name: neteaseSong.name,
+            coverUrl: neteaseSong.coverUrl,
+          }),
+        ])
+        return
+      }
       const files = Array.from(e.dataTransfer.files)
       if (files.length === 0) return
       e.preventDefault()
-      const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY })
       void importFiles(files, pos)
     },
     [screenToFlowPosition],
@@ -303,6 +328,12 @@ function BoardInner() {
           useUiStore.getState().openAiNode(node.id)
           break
         }
+        case 'prompt':
+          store.addNodes([createPromptNode(pos)])
+          break
+        case 'netease':
+          store.addNodes([createNeteaseNode(pos)])
+          break
         case 'heading':
           store.addNodes([createHeadingNode(pos, (detail.level as HeadingLevel) ?? 1, true)])
           break
@@ -397,7 +428,7 @@ function BoardInner() {
       edgeTypes={edgeTypes}
       onNodesChange={handleNodesChange}
       onEdgesChange={onEdgesChange}
-      onConnect={onConnect}
+      onConnect={handleConnect}
       onNodeDragStart={onNodeDragStart}
       onNodeDrag={onNodeDrag}
       onNodeDragStop={onNodeDragStop}

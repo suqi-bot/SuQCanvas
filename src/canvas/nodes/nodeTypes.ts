@@ -5,7 +5,9 @@ import { GroupNode } from './GroupNode'
 import { HeadingNode } from './HeadingNode'
 import { ImageNode } from './ImageNode'
 import { MarkdownNode } from './MarkdownNode'
+import { NeteaseNode } from './NeteaseNode'
 import { PdfNode } from './PdfNode'
+import { PromptNode } from './PromptNode'
 import { PsdNode } from './PsdNode'
 import { ShapeNode } from './ShapeNode'
 import { StickyNode } from './StickyNode'
@@ -25,4 +27,6 @@ export const mediaNodeTypes: NodeTypes = {
   sticky: StickyNode,
   shape: ShapeNode,
   group: GroupNode,
+  prompt: PromptNode,
+  netease: NeteaseNode,
 }

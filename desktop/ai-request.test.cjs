@@ -43,6 +43,33 @@ test('desktop image upload sends multipart image bytes and input type', async ()
   } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)) }
 })
 
+test('desktop image edit upload sends OpenAI-compatible form fields', async () => {
+  let captured
+  const server = http.createServer(async (req, res) => {
+    const chunks = []
+    for await (const chunk of req) chunks.push(chunk)
+    captured = { headers: req.headers, body: Buffer.concat(chunks).toString() }
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify({ data: [{ b64_json: Buffer.from('out').toString('base64') }] }))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const response = await aiRequest({
+      url: `http://127.0.0.1:${server.address().port}/images/edits`, method: 'POST', key: 'k',
+      upload: {
+        base64: Buffer.from('source-pixels').toString('base64'), name: 'source.png', type: 'image/png',
+        fields: { prompt: 'split layers', model: 'edit-model', n: '2' },
+      },
+    })
+    assert.equal(response.status, 200)
+    assert.match(captured.body, /name="image"; filename="source.png"/)
+    assert.match(captured.body, /name="prompt"\r\n\r\nsplit layers/)
+    assert.match(captured.body, /name="model"\r\n\r\nedit-model/)
+    assert.match(captured.body, /name="n"\r\n\r\n2/)
+    assert.doesNotMatch(captured.body, /name="type"\r\n\r\ninput/)
+  } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)) }
+})
+
 test('desktop AI transport aborts an in-flight request', async () => {
   let received
   const started = new Promise((resolve) => { received = resolve })

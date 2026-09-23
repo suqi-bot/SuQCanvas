@@ -3,9 +3,9 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { SuqNode } from '../types'
 
 const mocks = vi.hoisted(() => ({
-  generate: vi.fn(), putAsset: vi.fn(), toast: vi.fn(), resume: vi.fn(), project: { projectId: 'project-a', projectName: '项目 A', initialized: true, loaded: true, busy: false, saveStatus: 'saved', saveNow: vi.fn() },
+  generate: vi.fn(), edit: vi.fn(), editDashscope: vi.fn(), putAsset: vi.fn(), toast: vi.fn(), resume: vi.fn(), project: { projectId: 'project-a', projectName: '项目 A', initialized: true, loaded: true, busy: false, saveStatus: 'saved', saveNow: vi.fn() },
 }))
-vi.mock('./client', async (original) => ({ ...await original<typeof import('./client')>(), generateCompatible: mocks.generate, waitForComfy: mocks.resume }))
+vi.mock('./client', async (original) => ({ ...await original<typeof import('./client')>(), generateCompatible: mocks.generate, editCompatibleImage: mocks.edit, editDashscopeImage: mocks.editDashscope, waitForComfy: mocks.resume }))
 vi.mock('../store/projectStore', () => ({ useProjectStore: { getState: () => mocks.project } }))
 vi.mock('../store/authStore', () => ({ useAuthStore: { getState: () => ({ user: null }) } }))
 vi.mock('../store/uiStore', () => ({ toast: mocks.toast }))
@@ -126,11 +126,15 @@ it('persists settings without credentials or active job state', () => {
   vi.stubGlobal('localStorage', { setItem })
   useAiStore.getState().setCredentials({ comfyKey: 'test-secret', cloudKey: 'test-secret', llmKey: 'test-secret' })
   saveAiSettings()
-  const saved = JSON.parse(setItem.mock.calls[0][1])
+  const settingsCall = setItem.mock.calls.find(([key]) => key === 'suqcanvas-ai-settings-v1')
+  expect(settingsCall).toBeDefined()
+  const saved = JSON.parse(settingsCall![1] as string)
   expect(saved.model).toBe('test-model')
   expect(saved).not.toHaveProperty('cloudKey')
   expect(saved).not.toHaveProperty('jobs')
-  expect(setItem.mock.calls[0][1]).not.toContain('test-secret')
+  expect(settingsCall![1] as string).not.toContain('test-secret')
+  const credentialsCall = setItem.mock.calls.find(([key]) => key === 'suqcanvas-ai-credentials-v1')
+  expect(credentialsCall?.[1]).toContain('test-secret')
 })
 
 function task(overrides: Partial<AiTask> = {}): AiTask {
@@ -207,7 +211,7 @@ it('uploads a split source, binds negative text, and retains the original image'
     fetch.mockResolvedValueOnce(new Response(JSON.stringify(value)))
   }
   vi.stubGlobal('fetch', fetch)
-  await generateAiNode('one', '拆图', new Blob(['original'], { type: 'image/png' }))
+  await generateAiNode('one', '图生图', new Blob(['original'], { type: 'image/png' }))
   const submitted = JSON.parse(fetch.mock.calls[1][1].body).prompt
   expect(submitted.load.inputs.image).toBe('split/uploaded.png')
   expect(submitted.negative.inputs.text).toBe('水印')
@@ -216,6 +220,93 @@ it('uploads a split source, binds negative text, and retains the original image'
   expect(saved.state).toBe('done')
   expect(saved.sourceBlob).toBeUndefined()
   expect(saved.info.negativePrompt).toBe('水印')
+})
+
+it('runs OpenAI-compatible image edit for split with source blob', async () => {
+  const target = node('one')
+  target.data.ai = { ...target.data.ai!, provider: 'compatible', parameterSource: 'original',
+    serviceUrl: 'http://example.test/v1', model: 'edit-model', size: '1024x1024',
+    splitCount: 2, workflow: '', binding: '', draftNegativePrompt: '水印' }
+  useCanvasStore.setState({ nodes: [target] })
+  useAiStore.getState().setSettings({ splitProvider: 'compatible', splitCloudUrl: 'http://example.test/v1', splitModel: 'edit-model', cloudUrl: 'http://other.test/v1' })
+  mocks.edit.mockResolvedValueOnce([
+    new Blob(['layer-a'], { type: 'image/png' }),
+    new Blob(['layer-b'], { type: 'image/png' }),
+  ])
+  await generateAiNode('one', '拆为主体背景', new Blob(['source'], { type: 'image/png' }))
+  expect(mocks.edit).toHaveBeenCalledOnce()
+  expect(mocks.edit.mock.calls[0][0]).toMatchObject({ url: 'http://example.test/v1', model: 'edit-model' })
+  expect(await mocks.edit.mock.calls[0][1].text()).toBe('source')
+  expect(mocks.edit.mock.calls[0][2]).toBe('拆为主体背景')
+  expect(mocks.edit.mock.calls[0][4]).toMatchObject({ n: 2, negativePrompt: '水印' })
+  expect(mocks.generate).not.toHaveBeenCalled()
+  const saved = (await db.aiTasks.toArray())[0]
+  expect(saved.state).toBe('done')
+  expect(saved.info.provider).toBe('compatible')
+  // First layer updates the original node; remaining layers are added beside it.
+  expect(useCanvasStore.getState().nodes).toHaveLength(2)
+})
+
+it('routes apiStyle dashscope split to the multimodal-generation edit API', async () => {
+  const target = node('one')
+  target.data.ai = { ...target.data.ai!, provider: 'compatible', apiStyle: 'dashscope', parameterSource: 'original',
+    serviceUrl: 'https://maas.qianwenaiapi.com/api/v1', model: 'qwen-image-3.0', size: '',
+    splitCount: 2, workflow: '', binding: '', draftNegativePrompt: '水印' }
+  useCanvasStore.setState({ nodes: [target] })
+  useAiStore.getState().setSettings({ splitProvider: 'dashscope', splitCloudUrl: 'https://maas.qianwenaiapi.com/api/v1', splitModel: 'qwen-image-3.0', cloudUrl: 'http://other.test/v1' })
+  mocks.editDashscope.mockResolvedValueOnce([new Blob(['layer'], { type: 'image/png' })])
+  await generateAiNode('one', '拆为主体背景', new Blob(['source'], { type: 'image/png' }))
+  expect(mocks.editDashscope).toHaveBeenCalledOnce()
+  expect(mocks.editDashscope.mock.calls[0][0]).toMatchObject({ url: 'https://maas.qianwenaiapi.com/api/v1', model: 'qwen-image-3.0' })
+  expect(mocks.edit).not.toHaveBeenCalled()
+  expect(mocks.editDashscope.mock.calls[0][4]).toMatchObject({ n: 2, negativePrompt: '水印' })
+  const saved = (await db.aiTasks.toArray())[0]
+  expect(saved.state).toBe('done')
+  expect(saved.info.apiStyle).toBe('dashscope')
+})
+
+it('runs in-place img2img and stores the result as a preview without replacing the original', async () => {
+  const target = node('one')
+  target.data.assetId = 'original-asset'
+  target.data.ai = { ...target.data.ai!, genMode: 'edit', status: 'done' }
+  useCanvasStore.setState({ nodes: [target] })
+  await db.assets.put({ id: 'original-asset', name: 'a.png', mime: 'image/png', size: 4, kind: 'image', blob: new Blob(['orig']) })
+  useAiStore.getState().setSettings({ provider: 'compatible', cloudUrl: 'http://example.test/v1', model: 'edit-model', splitCloudUrl: '', splitModel: '', splitProvider: 'compatible' })
+  mocks.edit.mockResolvedValueOnce([new Blob(['edited'], { type: 'image/png' })])
+
+  await generateAiNode('one', '改成夜景')
+
+  expect(mocks.edit).toHaveBeenCalledOnce()
+  expect(mocks.edit.mock.calls[0][0]).toMatchObject({ url: 'http://example.test/v1', model: 'edit-model' })
+  expect(await mocks.edit.mock.calls[0][1].text()).toBe('orig')
+  expect(mocks.edit.mock.calls[0][2]).toBe('改成夜景')
+  const saved = (await db.aiTasks.toArray())[0]
+  expect(saved.state).toBe('done')
+  expect(saved.info.genMode).toBe('edit')
+  expect(saved.info.provider).toBe('compatible')
+  expect(saved.previewAssetId).toBeTruthy()
+  const data = useCanvasStore.getState().nodes[0].data
+  expect(data.assetId).toBe('original-asset')
+  expect(data.ai?.editPreviewAssetId).toBe(saved.previewAssetId)
+  expect(data.ai?.generationId).toBe(saved.id)
+  expect(useCanvasStore.getState().nodes).toHaveLength(1)
+})
+
+it('requires an image and an img2img endpoint for in-place editing', async () => {
+  const target = node('one')
+  target.data.ai = { ...target.data.ai!, genMode: 'edit' }
+  useCanvasStore.setState({ nodes: [target] })
+  await generateAiNode('one', '改一下')
+  expect(mocks.toast).toHaveBeenCalledWith('图生图需要节点已有图片', 'error')
+  expect(mocks.edit).not.toHaveBeenCalled()
+
+  target.data.assetId = 'original-asset'
+  useCanvasStore.setState({ nodes: [{ ...target }] })
+  await db.assets.put({ id: 'original-asset', name: 'a.png', mime: 'image/png', size: 4, kind: 'image', blob: new Blob(['orig']) })
+  useAiStore.getState().setSettings({ cloudUrl: '', splitCloudUrl: '' })
+  await generateAiNode('one', '改一下')
+  expect(mocks.toast).toHaveBeenCalledWith('请先在 AI 生图设置中配置图生图服务地址', 'error')
+  expect(mocks.edit).not.toHaveBeenCalled()
 })
 
 it('places grid outputs in rows without AI metadata and applies them idempotently', async () => {

@@ -5,6 +5,7 @@ const { pathToFileURL } = require('node:url')
 const { autoUpdater } = require('electron-updater')
 const { createUpdater } = require('./updater.cjs')
 const { aiRequest } = require('./ai-request.cjs')
+const { createNeteasePanel } = require('./netease.cjs')
 
 const APP_URL = 'suqcanvas://app/SuQCanvas/'
 protocol.registerSchemesAsPrivileged([{ scheme: 'suqcanvas', privileges: {
@@ -20,6 +21,8 @@ let rendererReady = false
 let installRequested = false
 let updater
 const pendingFiles = process.argv.filter((arg) => path.isAbsolute(arg) && arg.toLowerCase().endsWith('.sqcanvas'))
+/** 网易云嵌入面板（WebContentsView），登录态 persist:netease */
+let neteasePanel
 
 function trusted(event) {
   if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame ||
@@ -131,6 +134,28 @@ else {
       return true
     })
     ipcMain.handle('desktop:show-data', async (event) => { trusted(event); return shell.openPath(app.getPath('userData')) })
+    const AI_CREDENTIALS_FILE = 'ai-credentials.json'
+    ipcMain.handle('desktop:read-ai-credentials', async (event) => {
+      trusted(event)
+      try {
+        const raw = await readFile(path.join(app.getPath('userData'), AI_CREDENTIALS_FILE), 'utf8')
+        const parsed = JSON.parse(raw)
+        if (!parsed || typeof parsed !== 'object') return {}
+        const pick = (key) => (typeof parsed[key] === 'string' ? parsed[key] : '')
+        return { comfyKey: pick('comfyKey'), cloudKey: pick('cloudKey'), llmKey: pick('llmKey') }
+      } catch {
+        return {}
+      }
+    })
+    ipcMain.handle('desktop:write-ai-credentials', async (event, credentials) => {
+      trusted(event)
+      if (!credentials || typeof credentials !== 'object') throw new Error('无效的凭据')
+      const pick = (key) => (typeof credentials[key] === 'string' ? credentials[key] : '')
+      const payload = { comfyKey: pick('comfyKey'), cloudKey: pick('cloudKey'), llmKey: pick('llmKey'), updatedAt: Date.now() }
+      await mkdir(app.getPath('userData'), { recursive: true })
+      await writeFile(path.join(app.getPath('userData'), AI_CREDENTIALS_FILE), JSON.stringify(payload, null, 2), 'utf8')
+      return true
+    })
     const aiRequests = new Map()
     ipcMain.handle('desktop:ai-request', async (event, request) => {
       trusted(event)
@@ -144,7 +169,81 @@ else {
       trusted(event)
       aiRequests.get(`${event.sender.id}:${requestId}`)?.abort()
     })
+    neteasePanel = createNeteasePanel({ getWindow: () => window })
+    ipcMain.handle('desktop:netease-open', async (event, payload) => {
+      trusted(event)
+      const url = payload && typeof payload.url === 'string' ? payload.url : undefined
+      const bounds = payload && typeof payload.bounds === 'object' ? payload.bounds : undefined
+      return neteasePanel.open({ input: url, bounds })
+    })
+    ipcMain.handle('desktop:netease-navigate', async (event, payload) => {
+      trusted(event)
+      const url = payload && typeof payload.url === 'string' ? payload.url : ''
+      return neteasePanel.navigate(url)
+    })
+    ipcMain.on('desktop:netease-layout', (event, bounds) => {
+      trusted(event)
+      neteasePanel.layout(bounds)
+    })
+    ipcMain.handle('desktop:netease-pause', async (event) => {
+      trusted(event)
+      return neteasePanel.pause()
+    })
+    ipcMain.handle('desktop:netease-try-play', async (event) => {
+      trusted(event)
+      return neteasePanel.tryPlay()
+    })
+    ipcMain.handle('desktop:netease-play-song', async (event, songId) => {
+      trusted(event)
+      return neteasePanel.playSong(typeof songId === 'string' ? songId : '')
+    })
+    ipcMain.handle('desktop:netease-playback-state', async (event) => {
+      trusted(event)
+      return neteasePanel.getPlaybackState()
+    })
+    ipcMain.handle('desktop:netease-toggle', async (event) => {
+      trusted(event)
+      return neteasePanel.togglePlayback()
+    })
+    ipcMain.handle('desktop:netease-fetch-liked', async (event) => {
+      trusted(event)
+      return neteasePanel.fetchLiked()
+    })
+    ipcMain.handle('desktop:netease-fetch-playlists', async (event) => {
+      trusted(event)
+      return neteasePanel.fetchPlaylists()
+    })
+    ipcMain.handle('desktop:netease-fetch-playlist-songs', async (event, playlistId) => {
+      trusted(event)
+      return neteasePanel.fetchPlaylistSongs(typeof playlistId === 'string' ? playlistId : '')
+    })
+    ipcMain.handle('desktop:netease-search', async (event, query) => {
+      trusted(event)
+      return neteasePanel.search(typeof query === 'string' ? query : '')
+    })
+    ipcMain.handle('desktop:netease-show-browser', async (event, bounds) => {
+      trusted(event)
+      return neteasePanel.showBrowser(bounds)
+    })
+    ipcMain.handle('desktop:netease-hide-browser', async (event) => {
+      trusted(event)
+      return neteasePanel.hideBrowser()
+    })
+    ipcMain.handle('desktop:netease-logged-in', async (event) => {
+      trusted(event)
+      return neteasePanel.isLoggedIn()
+    })
+    ipcMain.on('desktop:netease-close', (event) => {
+      trusted(event)
+      neteasePanel.close()
+    })
+    // 窗口缩放后由渲染端 ResizeObserver 再 sync；这里兜底保持 bounds 合法
+    window.on('resize', () => {
+      if (neteasePanel?.isOpen()) neteasePanel.layout(null)
+    })
     window.webContents.once('destroyed', () => {
+      neteasePanel?.dispose()
+      neteasePanel = undefined
       for (const controller of aiRequests.values()) controller.abort()
       aiRequests.clear()
     })

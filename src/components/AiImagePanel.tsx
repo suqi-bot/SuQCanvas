@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { baseUrl, parseWorkflow, recentWorkflow, request, textBindings, type Workflow } from '../ai/client'
+import { baseUrl, comfyObjectInfo, comfyParamSpec, parseWorkflow, recentWorkflow, request, textBindings, type ComfyObjectInfo, type Workflow } from '../ai/client'
 import { useAiStore, saveAiSettings, type AiSettings } from '../ai/store'
 import { SplitWorkflowSettings } from './SplitWorkflowSettings'
 
@@ -17,9 +17,19 @@ export function AiImagePanel() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [objectInfo, setObjectInfo] = useState<ComfyObjectInfo | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   useEffect(() => { if (open) dialog.current?.showModal() }, [open])
+  async function loadObjectInfo() {
+    try { setObjectInfo(await comfyObjectInfo({ url: settings.comfyUrl, key: comfyKey })) }
+    catch { setObjectInfo(null) }
+  }
+  useEffect(() => {
+    if (open && settings.provider === 'comfy') void loadObjectInfo()
+    // 打开设置时自动读取一次；地址变更后可点「刷新可选项」重新拉取。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, settings.provider])
   function update(key: keyof AiSettings, value: string) { setSettings({ [key]: value }) }
   let workflow: Workflow | null = null
   try { if (settings.workflow) workflow = parseWorkflow(settings.workflow) } catch { /* Validated before generation. */ }
@@ -45,7 +55,7 @@ export function AiImagePanel() {
       onCancel={(event) => { event.preventDefault(); close() }} onKeyDown={(event) => event.stopPropagation()}>
       <div className="mb-4 flex items-center justify-between"><h2 id="ai-title" className="text-lg font-semibold">AI 生图设置</h2>
         <button type="button" className={button} onClick={close}>关闭</button></div>
-      <p className="mb-4 text-xs text-mid">配置生图服务、参数和提示词优化模型。通过「插入 → AI 图片」在画布中输入需求、发送生成。关闭设置不会停止后台生成。API Key 仅保留在本次应用会话中。</p>
+      <p className="mb-4 text-xs text-mid">配置生图服务、参数和提示词优化模型。通过「插入 → AI 图片」在画布中输入需求、发送生成。关闭设置不会停止后台生成。API Key 保存在本机独立凭据中，重启后会自动恢复。</p>
       <fieldset disabled={busy} className="space-y-4 disabled:opacity-70">
         <label className="block text-xs">生图服务<select className={field + ' mt-1'} value={settings.provider} onChange={(e) => update('provider', e.target.value)}>
           <option value="comfy">ComfyUI（本地 / 远程）</option><option value="compatible">OpenAI 兼容 Images API</option>
@@ -80,17 +90,54 @@ export function AiImagePanel() {
           </select></label>}
           {workflow && <details className="rounded-md border border-edge2 p-3"><summary className="cursor-pointer text-sm">生成参数（模型、尺寸、步数、种子等）</summary>
             <label className="my-3 flex gap-2 text-xs"><input type="checkbox" checked={randomSeed} onChange={(e) => setRandomSeed(e.target.checked)} />每次随机种子（关闭后使用下方种子）</label>
+            <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-mid">
+              <button type="button" className={button} disabled={busy} onClick={() => void run(async () => {
+                await loadObjectInfo(); setMessage('已刷新参数下拉可选项。')
+              })}>刷新可选项</button>
+              {!objectInfo && <span>未能读取服务端可选项，枚举参数暂为手输；可点「刷新可选项」重试。</span>}
+            </div>
             <div className="grid grid-cols-2 gap-3">{Object.entries(workflow).flatMap(([nodeId, node]) => Object.entries(node.inputs)
               .filter(([input, value]) => ['number', 'string', 'boolean'].includes(typeof value) && JSON.stringify({ node: nodeId, input }) !== settings.binding && JSON.stringify({ node: nodeId, input }) !== settings.negativeBinding)
-              .map(([input, value]) => <label key={`${nodeId}.${input}`} className="text-xs">{node._meta?.title || node.class_type} · {nodeId} · {input}
-                <input className={field + ' mt-1'} type={typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'checkbox' : 'text'}
-                  step="any" checked={typeof value === 'boolean' ? value : undefined} value={typeof value === 'boolean' ? undefined : String(value)}
-                  onChange={(e) => {
-                    const copy = structuredClone(workflow!)
-                    copy[nodeId].inputs[input] = typeof value === 'number' ? Number(e.target.value) : typeof value === 'boolean' ? e.target.checked : e.target.value
-                    update('workflow', JSON.stringify(copy))
-                  }} />
-              </label>))}</div>
+              .map(([input, value]) => {
+                const spec = comfyParamSpec(objectInfo, node.class_type, input)
+                const options = spec?.options?.map(String)
+                const current = String(value)
+                const control = options
+                  ? <select className={field + ' mt-1'} aria-label={`${nodeId}.${input}`} value={current}
+                      onChange={(e) => {
+                        const copy = structuredClone(workflow!)
+                        copy[nodeId].inputs[input] = typeof value === 'number' ? Number(e.target.value) : e.target.value
+                        update('workflow', JSON.stringify(copy))
+                      }}>
+                      {!options.includes(current) && <option value={current}>{current}</option>}
+                      {options.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                  : typeof value === 'boolean'
+                    ? <input className="mt-1 block" type="checkbox" checked={value}
+                        onChange={(e) => {
+                          const copy = structuredClone(workflow!)
+                          copy[nodeId].inputs[input] = e.target.checked
+                          update('workflow', JSON.stringify(copy))
+                        }} />
+                    : typeof value === 'number'
+                      ? <input className={field + ' mt-1'} type="number"
+                          min={spec?.min} max={spec?.max} step={spec?.step ?? (Number.isInteger(value) ? 1 : 'any')}
+                          value={value}
+                          onChange={(e) => {
+                            const copy = structuredClone(workflow!)
+                            copy[nodeId].inputs[input] = Number(e.target.value)
+                            update('workflow', JSON.stringify(copy))
+                          }} />
+                      : <input className={field + ' mt-1'} type="text" value={String(value)}
+                          onChange={(e) => {
+                            const copy = structuredClone(workflow!)
+                            copy[nodeId].inputs[input] = e.target.value
+                            update('workflow', JSON.stringify(copy))
+                          }} />
+                return <label key={`${nodeId}.${input}`} className="text-xs">{node._meta?.title || node.class_type} · {nodeId} · {input}
+                  {control}
+                </label>
+              }))}</div>
           </details>}
           <p className="text-xs text-mid">先在 ComfyUI 跑通工作流，再读取或导入。可展开生成参数调整模型、尺寸、负面词及采样参数。网页版连接其他地址需服务允许跨域；127.0.0.1 指当前设备。</p>
         </> : <>
@@ -98,7 +145,7 @@ export function AiImagePanel() {
           <label className="block text-xs">API Key<input type="password" autoComplete="off" className={field + ' mt-1'} value={cloudKey} onChange={(e) => setCloudKey(e.target.value)} /></label>
           <div className="grid grid-cols-2 gap-3"><label className="text-xs">模型名称<input className={field + ' mt-1'} value={settings.model} onChange={(e) => update('model', e.target.value)} /></label>
             <label className="text-xs">图片尺寸<input className={field + ' mt-1'} placeholder="1024x1024 或 auto" value={settings.size} onChange={(e) => update('size', e.target.value)} /></label></div>
-          <p className="text-xs text-mid">服务需支持 /images/generations，并返回 b64_json 或图片 URL；模型及尺寸请按服务商填写。</p>
+          <p className="text-xs text-mid">服务需支持 /images/generations（文生图），图生图另用 /images/edits；返回 b64_json 或图片 URL。模型及尺寸请按服务商填写。</p>
         </>}
         <label className="block text-xs">默认反向提示词<textarea className={field + ' mt-1'} value={settings.negativePrompt} onChange={(e) => update('negativePrompt', e.target.value)} placeholder="不希望出现的内容，例如：模糊、水印" /></label>
         {settings.provider === 'compatible' && <p className="text-xs text-mid">填写反向提示词时会发送 negative_prompt 扩展字段，需要你的服务支持；不支持时请留空。</p>}
@@ -113,7 +160,7 @@ export function AiImagePanel() {
         </details>
 
         <button className={button} onClick={() => {
-          try { saveAiSettings(); setMessage('配置已保存（不含 API Key）。'); setError('') }
+          try { saveAiSettings(); setMessage('配置与 API Key 已保存到本机。'); setError('') }
           catch { setError('保存配置失败，浏览器存储可能已满。') }
         }}>保存配置</button>
       </fieldset>

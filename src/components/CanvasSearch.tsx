@@ -17,6 +17,8 @@ const KIND_LABELS: Record<MediaKind, string> = {
   heading: '标题',
   sticky: '便签',
   shape: '图形',
+  prompt: '提示词',
+  netease: '网易云',
 }
 
 const MAX_RESULTS = 60

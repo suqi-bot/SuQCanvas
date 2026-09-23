@@ -24,7 +24,7 @@ export async function splitGrid(blob: Blob, rows: number, columns: number, gap: 
       signal?.throwIfAborted()
       canvas.width = cell.width; canvas.height = cell.height
       const context = canvas.getContext('2d')
-      if (!context) throw new Error('无法创建拆图画布')
+      if (!context) throw new Error('无法创建裁切画布')
       context.drawImage(image, cell.x, cell.y, cell.width, cell.height, 0, 0, cell.width, cell.height)
       results.push(await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('图片编码失败')), 'image/png')))
     }

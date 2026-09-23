@@ -54,6 +54,12 @@ let audioElement: HTMLAudioElement | null = null
 let orderProvider: (() => string[]) | null = null
 /** 异步 URL 解析的竞态令牌：快速连续 play() 时只应用最后一次 */
 let playSeq = 0
+/** 本地起播前暂停外部源（如网易云面板）的钩子，由 neteaseStore 注册，避免循环依赖 */
+let pauseExternalSource: (() => void) | null = null
+
+export function setExternalSourcePauseHook(hook: (() => void) | null): void {
+  pauseExternalSource = hook
+}
 
 export function bindPlayerAudio(el: HTMLAudioElement | null): void {
   audioElement = el
@@ -174,6 +180,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   play: (t, opts) => {
     const el = audioElement
     const seq = ++playSeq
+    // 本地与外部源互斥出声
+    pauseExternalSource?.()
     const current = get().track
     // 同一首歌：不重新加载，仅保持/恢复播放状态
     if (current && current.assetId === t.assetId) {

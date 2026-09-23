@@ -500,6 +500,35 @@ export function InspectorPanel() {
               className="w-full rounded-md border border-edge2 bg-panel2 px-2 py-1.5 text-xs text-main outline-none focus:border-sky-500"
             />
           </Section>
+          {selectedEditableNodes.length === 1 && firstNode.data.kind === 'netease' && (
+            <Section title="网易云">
+              <div className="space-y-2">
+                <input
+                  value={firstNode.data.neteaseId ?? ''}
+                  onChange={(e) => updateNodeData(firstNode.id, { neteaseId: e.target.value.trim() })}
+                  placeholder="歌曲/歌单 ID 或 music.163.com 链接"
+                  className="w-full rounded-md border border-edge2 bg-panel2 px-2 py-1.5 text-xs text-main outline-none focus:border-rose-500"
+                />
+                <input
+                  value={firstNode.data.neteaseCoverUrl ?? ''}
+                  onChange={(e) => updateNodeData(firstNode.id, { neteaseCoverUrl: e.target.value.trim() || undefined })}
+                  placeholder="封面图 HTTPS 链接（可选）"
+                  className="w-full rounded-md border border-edge2 bg-panel2 px-2 py-1.5 text-xs text-main outline-none focus:border-rose-500"
+                />
+                <button
+                  type="button"
+                  className="w-full rounded-md bg-rose-500 px-2 py-1.5 text-xs font-medium text-white hover:bg-rose-400"
+                  onClick={() => {
+                    void import('../store/neteaseStore').then(({ useNeteaseStore }) => {
+                      void useNeteaseStore.getState().openPanel(firstNode.data.neteaseId || null)
+                    })
+                  }}
+                >
+                  在网易云面板中打开
+                </button>
+              </div>
+            </Section>
+          )}
           {selectedEditableNodes.length === 1 && firstNode.data.ai && <Section title="AI 生成信息">
             <div className="space-y-2 break-words text-xs text-soft">
               <p className="whitespace-pre-wrap">{firstNode.data.ai.prompt || '尚未填写生成需求'}</p>

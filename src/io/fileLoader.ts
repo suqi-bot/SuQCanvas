@@ -127,6 +127,8 @@ const KIND_TO_TYPE: Record<MediaKind, string> = {
   heading: 'heading',
   sticky: 'sticky',
   shape: 'shape',
+  prompt: 'prompt',
+  netease: 'netease',
 }
 
 const PLACEHOLDER_SIZE: Record<MediaKind, { width?: number; height?: number }> = {
@@ -141,6 +143,8 @@ const PLACEHOLDER_SIZE: Record<MediaKind, { width?: number; height?: number }> =
   heading: { width: 360 },
   sticky: { width: 200, height: 160 },
   shape: { width: 180, height: 120 },
+  prompt: { width: 300, height: 280 },
+  netease: { width: 240, height: 160 },
 }
 
 export function createNodeForAsset(meta: AssetMeta, position: XYPosition): SuqNode {
@@ -206,6 +210,49 @@ export function createAiNode(position: XYPosition): SuqNode {
     id: genId('n'), type: 'image', position, width: 320, height: 240, selected: true,
     data: { kind: 'image', label: 'AI 图片', borderColor: '#0ea5e9',
       ai: { prompt: '', provider: '', model: '', size: '', workflow: '', binding: '', status: 'draft' } },
+  }
+}
+
+export interface NeteaseSongSeed {
+  id: string
+  name?: string
+  coverUrl?: string
+}
+
+export function createNeteaseNode(position: XYPosition, song?: NeteaseSongSeed): SuqNode {
+  const id = (song?.id ?? '').trim()
+  return {
+    id: genId('n'),
+    type: 'netease',
+    position,
+    width: 240,
+    height: 160,
+    selected: true,
+    data: {
+      kind: 'netease',
+      label: song?.name?.trim() || (id ? `网易云歌曲 ${id}` : '网易云歌曲'),
+      neteaseId: id,
+      ...(song?.coverUrl ? { neteaseCoverUrl: song.coverUrl } : {}),
+      borderColor: '#f43f5e',
+    },
+  }
+}
+
+export function createPromptNode(position: XYPosition): SuqNode {
+  return {
+    id: genId('n'),
+    type: 'prompt',
+    position,
+    width: 300,
+    height: 280,
+    selected: true,
+    data: {
+      kind: 'prompt',
+      label: '提示词',
+      text: '',
+      negativePrompt: '',
+      borderColor: '#0ea5e9',
+    },
   }
 }
 

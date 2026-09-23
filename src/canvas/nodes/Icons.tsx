@@ -60,6 +60,16 @@ export function CdIcon(props: IconProps) {
   )
 }
 
+export function NeteaseIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8 14.5c1.2 1.5 2.8 2.2 4.5 2.2 2.2 0 3.5-1.2 3.5-2.8 0-2.4-3.2-2.6-3.2-4.4 0-1 .8-1.7 1.9-1.7" />
+      <circle cx="12.2" cy="17.2" r="1" fill="currentColor" stroke="none" />
+    </Base>
+  )
+}
+
 export function TextIcon(props: IconProps) {
   return (
     <Base {...props}>
@@ -668,6 +678,17 @@ export function LockIcon(props: IconProps) {
   )
 }
 
+export function PromptIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4 6h16" />
+      <path d="M4 12h10" />
+      <path d="M4 18h14" />
+      <path d="M18.5 9.5l.7 1.5 1.5.7-1.5.7-.7 1.5-.7-1.5-1.5-.7 1.5-.7.7-1.5z" />
+    </Base>
+  )
+}
+
 export function KindIcon({ kind, ...props }: IconProps & { kind: MediaKind }) {
   switch (kind) {
     case 'image':
@@ -688,6 +709,10 @@ export function KindIcon({ kind, ...props }: IconProps & { kind: MediaKind }) {
       return <StickyIcon {...props} />
     case 'shape':
       return <ShapeIcon {...props} />
+    case 'prompt':
+      return <PromptIcon {...props} />
+    case 'netease':
+      return <NeteaseIcon {...props} />
     default:
       return <FileIcon {...props} />
   }

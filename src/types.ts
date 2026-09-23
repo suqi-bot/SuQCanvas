@@ -12,6 +12,8 @@ export type MediaKind =
   | 'heading'
   | 'sticky'
   | 'shape'
+  | 'prompt'
+  | 'netease'
 
 export type HeadingLevel = 1 | 2 | 3
 
@@ -71,6 +73,14 @@ export interface SuqNodeData extends Record<string, unknown> {
     draftNegativePrompt?: string
     negativeBinding?: string
     imageBinding?: string
+    /** 图生图期望输出张数（OpenAI 兼容 images/edits） */
+    splitCount?: number
+    /** openai=images/edits；dashscope=千问 multimodal-generation */
+    apiStyle?: 'openai' | 'dashscope'
+    /** 文生图 text / 图生图 edit：edit 用当前图片作原图，结果先对比再应用 */
+    genMode?: 'text' | 'edit'
+    /** 图生图待应用的预览资源；应用后替换 assetId 并清除 */
+    editPreviewAssetId?: string
     parameterSource?: 'original' | 'current'
     serviceUrl?: string
     generationId?: string
@@ -87,6 +97,10 @@ export interface SuqNodeData extends Record<string, unknown> {
   kind: MediaKind
   assetId?: string
   text?: string
+  /** 提示词节点：文生图 / 图生图；连线后同步到 AI 图片的 ai.genMode */
+  genMode?: 'text' | 'edit'
+  /** 提示词节点的反向提示词；AI 节点另有 ai.negativePrompt */
+  negativePrompt?: string
   label?: string
   fileSize?: number
   mime?: string
@@ -115,6 +129,10 @@ export interface SuqNodeData extends Record<string, unknown> {
   assetUpdatedAt?: number
   /** 音乐节点显式设置的专辑图素材 id */
   coverAssetId?: string
+  /** 网易云轻节点：歌曲/歌单 id 或完整链接片段（不含本地 asset） */
+  neteaseId?: string
+  /** 网易云封面图直链（可选，HTTPS） */
+  neteaseCoverUrl?: string
   // —— 分组/容器字段（本期范围，均为可选附加字段，零 schema 变更）——
   /** 分组容器：true 表示这是一个分组节点（React Flow 原生 group node） */
   isGroup?: boolean

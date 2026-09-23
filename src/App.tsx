@@ -9,6 +9,7 @@ import { PlayerPage } from './components/PlayerPage'
 import { MarkdownViewerModal } from './components/MarkdownViewerModal'
 import { FileManagerModal } from './components/FileManagerModal'
 import { GlobalPlayer } from './components/GlobalPlayer'
+import { NeteasePanel } from './components/NeteasePanel'
 import { AuthPage } from './components/AuthPage'
 import { useProjectStore } from './store/projectStore'
 import { useUiStore } from './store/uiStore'
@@ -65,6 +66,7 @@ export default function App() {
       <MarkdownViewerModal />
       <FileManagerModal />
       <GlobalPlayer />
+      <NeteasePanel />
       <Toasts />
       {IS_DESKTOP_BUILD && <DesktopLifecycle />}
       {busy && (

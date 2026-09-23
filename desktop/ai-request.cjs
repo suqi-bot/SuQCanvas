@@ -10,10 +10,15 @@ async function aiRequest(request, signal) {
   if (request.upload) {
     if (request.method !== 'POST' || request.body) throw new Error('无效的图片上传请求')
     const bytes = Buffer.from(request.upload.base64, 'base64')
-    if (bytes.length > 32 * 1024 * 1024) throw new Error('拆图原图不能超过 32MB')
+    if (bytes.length > 32 * 1024 * 1024) throw new Error('图生图原图不能超过 32MB')
     body = new FormData()
     body.append('image', new Blob([bytes], { type: request.upload.type }), request.upload.name)
-    body.append('type', 'input')
+    const fields = request.upload.fields
+    if (fields && Object.keys(fields).length) {
+      for (const [key, value] of Object.entries(fields)) body.append(key, value)
+    } else {
+      body.append('type', 'input')
+    }
   }
   const response = await fetch(url, { method: request.method, headers, body,
     redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000) })

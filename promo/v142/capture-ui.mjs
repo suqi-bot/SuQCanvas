@@ -1,0 +1,37 @@
+import { chromium } from 'playwright-core';
+import { createServer } from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+const root=path.resolve('promo/v142');
+fs.mkdirSync(path.join(root,'shots'),{recursive:true});
+const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.woff2':'font/woff2'};
+const server=createServer((req,res)=>{const rel=decodeURIComponent(req.url.split('?')[0]);let p=path.resolve(root,'app','.'+rel);if(p!==path.join(root,'app')&&!p.startsWith(path.join(root,'app')+path.sep)){res.writeHead(403).end();return;}if(!fs.existsSync(p)||fs.statSync(p).isDirectory())p=path.join(root,'app/index.html');res.setHeader('Content-Type',mime[path.extname(p)]||'application/octet-stream');fs.createReadStream(p).pipe(res)});
+await new Promise(r=>server.listen(4418,'127.0.0.1',r));
+const browser=await chromium.launch();
+try {
+ const page=await browser.newPage({viewport:{width:1600,height:900},deviceScaleFactor:1});
+ await page.goto('http://127.0.0.1:4418/');
+ await page.waitForTimeout(1500);
+ console.log((await page.locator('body').innerText()).slice(0,5000));
+ await page.screenshot({path:path.join(root,'shots/home.png')});
+ await page.locator('input[accept*=".sqcanvas"]').first().setInputFiles(path.resolve('promo/apple/demo.sqcanvas'));
+ await page.waitForTimeout(4000);
+ console.log('IMPORTED', (await page.locator('body').innerText()).slice(0,5000));
+ await page.screenshot({path:path.join(root,'shots/canvas.png')});
+ console.log('BUTTONS',await page.locator('button').evaluateAll(es=>es.map(e=>({text:e.innerText,title:e.title,aria:e.getAttribute('aria-label')}))));
+ await page.getByRole('button',{name:'桌面版',exact:true}).click();
+ await page.waitForTimeout(600);
+ await page.screenshot({path:path.join(root,'shots/home.png')});
+ await page.getByRole('button',{name:/新建项目/}).click();
+ await page.waitForTimeout(600);
+ await page.evaluate(()=>window.dispatchEvent(new CustomEvent('sq:add-node',{detail:{kind:'ai',position:{x:650,y:155}}})));
+ await page.waitForTimeout(600);
+ console.log('AI', (await page.locator('body').innerText()).slice(-3500));
+ await page.getByRole('textbox',{name:'图片生成需求'}).fill('清晨的山谷，云雾沿着湖面缓缓展开。柔和的自然光，冷绿色调，电影感构图。');
+ await page.waitForTimeout(700);
+ await page.screenshot({path:path.join(root,'shots/ai.png')});
+ await page.getByRole('button',{name:'AI 生图设置',exact:false}).first().click();
+ await page.waitForTimeout(500);
+ await page.screenshot({path:path.join(root,'shots/settings.png')});
+ console.log('SETTINGS', (await page.locator('body').innerText()).slice(-3500));
+} finally {await browser.close();server.close();}

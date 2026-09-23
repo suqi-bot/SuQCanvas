@@ -38,6 +38,8 @@
   --dim: #64748b;
   --faint: #475569;
   --well: rgba(2, 6, 23, 0.4);
+  --checker-a: #334155;
+  --checker-b: #1e293b;
   --nodebg: rgba(30, 41, 59, 0.95);
   --nodebar: rgba(15, 23, 42, 0.6);
   --nodebarline: rgba(51, 65, 85, 0.6);
@@ -90,6 +92,8 @@ html.light {
   --dim: #64748b;
   --faint: #94a3b8;
   --well: rgba(226, 232, 240, 0.55);
+  --checker-a: #ffffff;
+  --checker-b: #e2e8f0;
   --nodebg: rgba(255, 255, 255, 0.97);
   --nodebar: rgba(241, 245, 249, 0.85);
   --nodebarline: rgba(203, 213, 225, 0.8);
@@ -154,6 +158,14 @@ body,
 }
 
 .sq-page-scroll { scrollbar-gutter: stable; overscroll-behavior: contain; }
+
+/* 透明通道棋盘格背景:用于图片节点,让 PNG 等带 alpha 的图片透明区域可见 */
+.sq-checker {
+  background-color: var(--checker-b);
+  background-image: repeating-conic-gradient(var(--checker-a) 0% 25%, var(--checker-b) 0% 50%);
+  background-size: 16px 16px;
+  background-position: 0 0;
+}
 
 button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible {
   outline: 2px solid #38bdf8;

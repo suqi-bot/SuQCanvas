@@ -18,6 +18,8 @@ export interface AiTask {
   grid?: { rows: number; columns: number; gap: number; margin: number }
   blobs?: Blob[]
   resultNodes?: SuqNode[]
+  /** 图生图（genMode=edit）已落库的预览资源，应用后替换原图 */
+  previewAssetId?: string
 }
 
 export const aiJobKey = (projectId: string | null, nodeId: string) => `${projectId ?? ''}:${nodeId}`

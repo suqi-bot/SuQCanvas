@@ -1,6 +1,6 @@
 import { STICKY_COLORS } from '../types'
-import { TextIcon, HeadingIcon, StickyIcon, ShapeIcon } from '../canvas/nodes/Icons'
-type InsertKind = 'ai' | 'text' | 'heading' | 'sticky' | 'shape'
+import { TextIcon, HeadingIcon, StickyIcon, ShapeIcon, PromptIcon, NeteaseIcon } from '../canvas/nodes/Icons'
+type InsertKind = 'ai' | 'prompt' | 'text' | 'heading' | 'sticky' | 'shape' | 'netease'
 
 interface InsertItem {
   kind: InsertKind
@@ -12,6 +12,8 @@ interface InsertItem {
 
 const INSERT_ITEMS: InsertItem[] = [
   { kind: 'ai', label: 'AI 图片', icon: () => <span>✦</span> },
+  { kind: 'prompt', label: '提示词', icon: PromptIcon },
+  { kind: 'netease', label: '网易云歌曲', icon: NeteaseIcon },
   { kind: 'text', label: '文本', icon: TextIcon },
   { kind: 'heading', level: 1, label: '标题 1', icon: HeadingIcon },
   { kind: 'heading', level: 2, label: '标题 2', icon: HeadingIcon },
@@ -62,5 +64,6 @@ export function InsertMenuContent({ onInsert }: { onInsert: (item: Record<string
           </div>
         )}
       </div>
-    ))}</>
+    ))}
+</>
 }

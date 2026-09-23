@@ -2,7 +2,7 @@
   "appId": "com.suqcanvas.desktop",
   "productName": "SuQCanvas 桌面版",
   "directories": { "output": "release/desktop", "buildResources": "desktop" },
-  "files": ["desktop/main.cjs", "desktop/preload.cjs", "desktop/updater.cjs", "desktop/ai-request.cjs", "desktop/icon.ico", "dist-desktop/**/*", "package.json"],
+  "files": ["desktop/main.cjs", "desktop/preload.cjs", "desktop/updater.cjs", "desktop/ai-request.cjs", "desktop/netease.cjs", "desktop/icon.ico", "dist-desktop/**/*", "package.json"],
   "publish": [{ "provider": "github", "owner": "suqi-bot", "repo": "SuQCanvas", "releaseType": "draft" }],
   "asar": true,
   "npmRebuild": false,

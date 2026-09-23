@@ -1,4 +1,4 @@
-import { baseUrl, generateComfy, generateCompatible, parseWorkflow, prepareWorkflow, uploadComfyImage, waitForComfy, type Binding } from './client'
+import { baseUrl, editCompatibleImage, editDashscopeImage, generateComfy, generateCompatible, parseWorkflow, prepareWorkflow, uploadComfyImage, waitForComfy, type Binding } from './client'
 import { abortable } from './abort'
 import { splitGrid } from './gridSplit'
 import { useAiStore, type AiSettings } from './store'
@@ -70,6 +70,57 @@ export async function applyAiTask(taskId: string): Promise<void> {
   try {
     let task = await db.aiTasks.get(taskId)
     if (!task || task.state !== 'ready' || task.owner !== aiOwner()) return
+    // 图生图：结果存为预览资源，写入 editPreviewAssetId 供画布对比，不直接替换原图
+    if (task.info.genMode === 'edit') {
+      if (!task.previewAssetId) {
+        const blob = task.blobs?.[0]
+        if (!blob) throw new Error('图生图没有返回图片')
+        const ext = blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png'
+        const asset = await putAsset(new File([blob], `AI-edit-${task.id}.${ext}`, { type: blob.type || 'image/png' }))
+        task = { ...task, previewAssetId: asset.id, blobs: undefined }
+        await persist(task)
+      }
+      const project = useProjectStore.getState()
+      const current = task
+      if (project.busy || !project.initialized || current.owner !== aiOwner()) return
+      if (project.projectId === current.projectId) {
+        if (isNodeLockedByOther(current.nodeId)) return
+        const node = useCanvasStore.getState().nodes.find((n) => n.id === current.nodeId)
+        if (node?.data.ai) {
+          useCanvasStore.getState().updateNodeData(current.nodeId, {
+            ai: { ...node.data.ai, editPreviewAssetId: current.previewAssetId, generationId: current.id, status: 'done', generatedAt: current.updatedAt },
+          })
+          await project.saveNow()
+          if (useProjectStore.getState().saveStatus === 'error') throw new Error('预览已保留，但项目保存失败，请重试应用')
+          task = { ...current, state: 'done', message: '图生图完成，拖动对比线查看，点击「应用」替换原图' }
+          await persist(task)
+        } else {
+          task = { ...current, state: 'done', message: '原节点已删除，图生图结果未应用' }
+          await persist(task)
+        }
+        return
+      }
+      if (current.owner === 'local') {
+        let applied = false
+        await db.transaction('rw', db.projects, async () => {
+          const record = await db.projects.get(current.projectId)
+          if (!record || useProjectStore.getState().busy || useProjectStore.getState().projectId === current.projectId || aiOwner() !== current.owner) return
+          const nodes = record.graph.nodes.map((n) => n.id === current.nodeId && n.data.ai
+            ? { ...n, data: { ...n.data, ai: { ...n.data.ai, editPreviewAssetId: current.previewAssetId, generationId: current.id, status: 'done' as const, generatedAt: current.updatedAt } } }
+            : n)
+          if (!nodes.some((n) => n.id === current.nodeId && n.data.ai)) return
+          await db.projects.update(record.id, { graph: { ...record.graph, nodes }, updatedAt: Date.now() })
+          applied = true
+        })
+        if (!applied) return
+        task = { ...current, state: 'done', message: '图生图完成，打开原项目后对比应用' }
+        await persist(task)
+        return
+      }
+      task.message = '结果已保留，打开原在线项目后对比应用'
+      await persist(task)
+      return
+    }
     if (!task.resultNodes) {
       const nodes: SuqNode[] = []
       for (const [index, blob] of (task.blobs ?? []).entries()) {
@@ -132,11 +183,11 @@ async function execute(task: AiTask, abort: AbortController, key: string, resume
     await persist(task)
     abort.signal.throwIfAborted()
     const endpoint = { url: task.serviceUrl, key, model: task.info.model }
-    if (!resume && task.sourceBlob && task.info.imageBinding) {
-      progress('正在上传拆图原图…')
+    if (!resume && task.sourceBlob && task.info.imageBinding && task.info.provider === 'comfy') {
+      progress('正在上传图生图原图…')
       const workflow = parseWorkflow(task.info.workflow)
       const binding: Binding = JSON.parse(task.info.imageBinding)
-      if (typeof workflow[binding.node]?.inputs[binding.input] !== 'string') throw new Error('拆图工作流的图片输入无效')
+      if (typeof workflow[binding.node]?.inputs[binding.input] !== 'string') throw new Error('图生图工作流的图片输入无效')
       workflow[binding.node].inputs[binding.input] = await uploadComfyImage(endpoint, task.sourceBlob, abort.signal)
       task.info.workflow = JSON.stringify(workflow)
       await persist(task)
@@ -146,12 +197,21 @@ async function execute(task: AiTask, abort: AbortController, key: string, resume
       : task.info.provider === 'comfy'
         ? generateComfy(endpoint, parseWorkflow(task.info.workflow), JSON.parse(task.info.binding || '{}'), task.info.prompt,
           abort.signal, progress, true, async (promptId) => { task.promptId = promptId; task.sourceBlob = undefined; await persist(task) })
-        : generateCompatible(endpoint, task.info.prompt, task.info.size, abort.signal, task.info.negativePrompt)
+        : task.sourceBlob
+          ? (progress('正在调用图生图接口…'),
+            task.info.apiStyle === 'dashscope'
+              ? editDashscopeImage(endpoint, task.sourceBlob, task.info.prompt, abort.signal, {
+                n: task.info.splitCount, negativePrompt: task.info.negativePrompt })
+              : editCompatibleImage(endpoint, task.sourceBlob, task.info.prompt, abort.signal, {
+                n: task.info.splitCount, size: task.info.size, negativePrompt: task.info.negativePrompt }))
+          : generateCompatible(endpoint, task.info.prompt, task.info.size, abort.signal, task.info.negativePrompt)
     const blobs = await abortable(work, abort.signal)
     abort.signal.throwIfAborted()
     for (const blob of blobs) { const bitmap = await createImageBitmap(blob); bitmap.close() }
     abort.signal.throwIfAborted()
-    task.blobs = blobs; task.sourceBlob = undefined; task.state = 'ready'; task.message = '生成完成，正在保存到原项目'
+    const wasImageEdit = task.info.provider === 'compatible' && !!task.sourceBlob
+    task.blobs = blobs; task.sourceBlob = undefined; task.state = 'ready'
+    task.message = wasImageEdit ? '图生图完成，正在保存到原项目' : '生成完成，正在保存到原项目'
     await persist(task)
     await applyAiTask(task.id)
     toast(`「${task.projectName}」AI 图片生成完成，可在 AI 任务中查看`, 'success')
@@ -174,23 +234,51 @@ export async function generateAiNode(id: string, prompt: string, sourceBlob?: Bl
     const state = useAiStore.getState()
     const config = generationSettings(node.data.ai, state.settings)
     const negativePrompt = node.data.ai.draftNegativePrompt ?? config.negativePrompt ?? ''
-    if (config.provider === 'comfy' && negativePrompt.trim() && !config.negativeBinding) throw new Error('请先在 AI 生图设置中绑定反向提示词输入')
-    const serviceUrl = baseUrl(config.provider === 'comfy' ? config.comfyUrl : config.cloudUrl)
-    const currentUrl = config.provider === 'comfy' ? state.settings.comfyUrl : state.settings.cloudUrl
+    // 图生图模式：接管原生图操作，把节点当前图片作为原图执行编辑
+    const editMode = !sourceBlob && node.data.ai.genMode === 'edit'
+    if (!editMode && config.provider === 'comfy' && negativePrompt.trim() && !config.negativeBinding) throw new Error('请先在 AI 生图设置中绑定反向提示词输入')
+    const isSplitImageEdit = config.provider === 'compatible' && !!sourceBlob
+    let provider = config.provider
+    let endpointModel = config.model
+    let apiStyle = node.data.ai.apiStyle
+    let serviceUrl: string
+    if (editMode) {
+      const editBase = state.settings.splitCloudUrl || state.settings.cloudUrl
+      if (!editBase.trim()) throw new Error('请先在 AI 生图设置中配置图生图服务地址')
+      serviceUrl = baseUrl(editBase)
+      endpointModel = (state.settings.splitModel || state.settings.model || '').trim()
+      if (!endpointModel) throw new Error('请填写图生图模型名称')
+      apiStyle = state.settings.splitProvider === 'dashscope' ? 'dashscope' : 'openai'
+      provider = 'compatible'
+      if (!node.data.assetId) throw new Error('图生图需要节点已有图片')
+      const asset = await db.assets.get(node.data.assetId)
+      if (!asset?.blob) throw new Error('原图不可用，请刷新后重试')
+      sourceBlob = asset.blob
+    } else {
+      serviceUrl = baseUrl(config.provider === 'comfy' ? config.comfyUrl : config.cloudUrl)
+    }
+    const currentUrl = editMode ? (state.settings.splitCloudUrl || state.settings.cloudUrl)
+      : config.provider === 'comfy' ? state.settings.comfyUrl
+      : isSplitImageEdit ? (state.settings.splitCloudUrl || state.settings.cloudUrl)
+      : state.settings.cloudUrl
     // A credential configured for one service must not be sent to another imported endpoint.
     if (serviceUrl !== baseUrl(currentUrl)) throw new Error('原图服务地址与当前设置不同，请先在 AI 生图设置中切换到原服务')
-    const workflow = config.provider === 'comfy'
+    if (isSplitImageEdit && !(config.model || '').trim()) throw new Error('请填写图生图模型名称')
+    const workflow = !editMode && config.provider === 'comfy'
       ? node.data.ai.imageBinding && !config.binding
         ? config.negativeBinding ? prepareWorkflow(parseWorkflow(config.workflow), JSON.parse(config.negativeBinding), negativePrompt, config.randomSeed) : parseWorkflow(config.workflow)
         : prepareWorkflow(parseWorkflow(config.workflow || '{}'), JSON.parse(config.binding || '{}'), prompt.trim(), config.randomSeed,
         config.negativeBinding ? { binding: JSON.parse(config.negativeBinding), prompt: negativePrompt } : undefined) : null
-    const key = config.provider === 'comfy' ? state.comfyKey : state.cloudKey
+    const key = provider === 'comfy' ? state.comfyKey : state.cloudKey
     const task: AiTask = { id: genUuid(), projectId: project.projectId, projectName: project.projectName,
       nodeId: id, owner: aiOwner(), serviceUrl, needsKey: !!key, sourceBlob, createdAt: Date.now(), updatedAt: Date.now(), state: 'running',
-      message: '正在提交生成…', info: { prompt: prompt.trim(), provider: config.provider, model: config.model,
+      message: editMode ? '正在提交图生图…' : '正在提交生成…', info: { prompt: prompt.trim(), provider, model: endpointModel,
         size: config.size, workflow: workflow ? JSON.stringify(workflow) : '', binding: config.binding,
         negativePrompt, negativeBinding: config.negativeBinding,
         imageBinding: node.data.ai.imageBinding,
+        splitCount: node.data.ai.splitCount,
+        apiStyle,
+        genMode: editMode ? 'edit' : node.data.ai.genMode,
         randomSeed: config.randomSeed, serviceUrl } }
     await launch(task, abort, key)
   } catch (reason) {
@@ -205,7 +293,7 @@ export async function resumeAiTask(id: string): Promise<void> {
   if (task.state === 'ready') { await applyAiTask(id); return }
   if (task.grid && task.sourceBlob && task.state !== 'done') {
     const abort = new AbortController(); controllers.set(jobKey(task), abort)
-    task.state = 'running'; task.message = '正在恢复网格拆图'
+    task.state = 'running'; task.message = '正在恢复网格裁切'
     await launch(task, abort, '')
     return
   }
@@ -224,8 +312,8 @@ export async function generateGridNode(id: string, sourceBlob: Blob, grid: NonNu
   const abort = new AbortController()
   controllers.set(aiJobKey(project.projectId, id), abort)
   await launch({ id: genUuid(), projectId: project.projectId, projectName: project.projectName, nodeId: id,
-    owner: aiOwner(), createdAt: Date.now(), updatedAt: Date.now(), state: 'running', message: '正在本地拆图…',
-    info: { prompt: `网格拆图 ${grid.rows} × ${grid.columns}`, provider: 'grid', model: '', size: '', workflow: '', binding: '' },
+    owner: aiOwner(), createdAt: Date.now(), updatedAt: Date.now(), state: 'running', message: '正在本地裁切…',
+    info: { prompt: `网格裁切 ${grid.rows} × ${grid.columns}`, provider: 'grid', model: '', size: '', workflow: '', binding: '' },
     serviceUrl: '', needsKey: false, sourceBlob, grid }, abort, '')
 }
 let recovery: Promise<void> | undefined
