@@ -205,6 +205,10 @@ else {
       trusted(event)
       return neteasePanel.togglePlayback()
     })
+    ipcMain.handle('desktop:netease-seek-to', async (event, time) => {
+      trusted(event)
+      return neteasePanel.seekTo(time)
+    })
     ipcMain.handle('desktop:netease-fetch-liked', async (event) => {
       trusted(event)
       return neteasePanel.fetchLiked()

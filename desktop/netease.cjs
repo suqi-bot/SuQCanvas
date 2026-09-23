@@ -224,25 +224,66 @@ const GET_PLAYBACK_STATE_SCRIPT = `(() => {
     const m = hay.match(/song\\/?[?&]?id=(\\d+)/i) || hay.match(/[?&]id=(\\d+)/)
     songId = m ? m[1] : ''
   }
-  let playing = false
-  let time = 0
-  let duration = 0
-  for (const el of mediaElements()) {
-    if (!el.currentSrc && !el.src) continue
-    if (!el.paused && !el.ended) playing = true
-    const t = Number(el.currentTime) || 0
-    const d = Number(el.duration)
-    if (t > time) time = t
-    if (Number.isFinite(d) && d > duration) duration = d
-  }
+  const media = mediaElements().find((el) =>
+    !el.paused && !el.ended && (el.currentSrc || el.src || el.readyState > 0)) ||
+    mediaElements().find((el) => el.currentSrc || el.src || el.readyState > 0)
+  let playing = Boolean(media && !media.paused && !media.ended)
+  let time = Number(media?.currentTime) || 0
+  let duration = Number(media?.duration) || 0
   const player = playerState()
   if (!playing) playing = player.playing
-  if (!time) time = player.time
-  if (!duration) duration = player.duration
+  // 网页可能保留上一首的 audio；底栏时钟对应当前歌曲，优先用它。
+  if (player.duration > 0) {
+    time = player.time
+    duration = player.duration
+  } else {
+    if (!media) time = player.time
+    if (!duration) duration = player.duration
+  }
   if (player.songId) songId = player.songId
   const progress = duration > 0 ? Math.min(1, time / duration) : player.progress
-  return { songId, playing, time, duration, progress, hash: String(location.hash || '') }
+  const ended = !playing && (Boolean(media?.ended) ||
+    (duration > 0 && time >= duration - 0.25))
+  return { songId, playing, ended, time, duration, progress, hash: String(location.hash || '') }
 })()`
+
+function buildSeekScript(time) {
+  if (!Number.isFinite(time) || time < 0 || time > 86400) return null
+  return `(async () => {
+    ${MEDIA_DOM_HELPERS}
+    const media = mediaElements().find((el) =>
+      !el.paused && (el.currentSrc || el.src || el.readyState > 0)) ||
+      mediaElements().find((el) => el.currentSrc || el.src || el.readyState > 0)
+    const player = playerState()
+    const mediaDuration = Number(media?.duration)
+    const duration = player.duration || (Number.isFinite(mediaDuration) ? mediaDuration : 0)
+    const next = duration > 0 ? Math.min(${time}, duration) : ${time}
+    const bar = playerBar()?.querySelector('.m-pbar .barbg, .m-pbar')
+    const rect = bar?.getBoundingClientRect()
+    const frame = bar?.ownerDocument?.defaultView?.frameElement?.getBoundingClientRect()
+    const point = rect?.width && duration > 0 ? {
+      x: Math.round(rect.left + (frame?.left || 0) + rect.width * next / duration),
+      y: Math.round(rect.top + (frame?.top || 0) + rect.height / 2),
+    } : null
+    if (media) {
+      try {
+        media.currentTime = next
+        await new Promise((resolve) => setTimeout(resolve, 180))
+        const actual = player.duration > 0 ? playerState().time : Number(media.currentTime)
+        if (Number.isFinite(actual) && Math.abs(actual - next) <= 1) return { ok: true, time: actual }
+      } catch { /* try the player bar */ }
+    }
+    if (!bar || !point) return { ok: false, time: playerState().time }
+    try {
+      for (const type of ['mousedown', 'mouseup', 'click']) {
+        bar.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: point.x - (frame?.left || 0), clientY: point.y - (frame?.top || 0), button: 0, buttons: type === 'mouseup' ? 0 : 1 }))
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      const actual = playerState().time
+      return { ok: Math.abs(actual - next) <= 1, time: actual, point }
+    } catch { return { ok: false, time: playerState().time, point } }
+  })()`
+}
 
 /** 名称是否像「我喜欢的音乐」 */
 function isLikedPlaylistName(name) {
@@ -676,7 +717,7 @@ function createNeteasePanel({ getWindow }) {
   let currentTarget = { type: 'home' }
   let lastStartedSongId = ''
   /** 离屏停放尺寸：0×0 会导致 Chromium 不跑媒体/合成 */
-  const PARKED = { x: -16000, y: -16000, width: 480, height: 360 }
+  const PARKED = { x: -16000, y: -16000, width: 1100, height: 400 }
 
   function ensureView() {
     if (view) return view
@@ -940,23 +981,49 @@ function createNeteasePanel({ getWindow }) {
     /** 读取播放状态：进度 / 是否在播 / 当前 song id */
     async getPlaybackState() {
       if (!view || view.webContents.isDestroyed()) {
-        return { songId: '', playing: false, time: 0, duration: 0, progress: 0, hash: '' }
+        return { songId: '', playing: false, ended: false, time: 0, duration: 0, progress: 0, hash: '' }
       }
       try {
         const s = await view.webContents.executeJavaScript(GET_PLAYBACK_STATE_SCRIPT, true)
         if (!s || typeof s !== 'object') {
-          return { songId: '', playing: false, time: 0, duration: 0, progress: 0, hash: '' }
+          return { songId: '', playing: false, ended: false, time: 0, duration: 0, progress: 0, hash: '' }
         }
         return {
           songId: String(s.songId || ''),
           playing: Boolean(s.playing || view.webContents.isCurrentlyAudible?.()),
+          ended: Boolean(s.ended),
           time: Number(s.time) || 0,
           duration: Number(s.duration) || 0,
           progress: Number(s.progress) || 0,
           hash: String(s.hash || ''),
         }
       } catch {
-        return { songId: '', playing: false, time: 0, duration: 0, progress: 0, hash: '' }
+        return { songId: '', playing: false, ended: false, time: 0, duration: 0, progress: 0, hash: '' }
+      }
+    },
+    async seekTo(time) {
+      if (!view || view.webContents.isDestroyed()) return { ok: false }
+      const script = buildSeekScript(time)
+      if (!script) return { ok: false }
+      try {
+        const result = await view.webContents.executeJavaScript(script, true)
+        if (result?.ok || !result?.point || !view.webContents.sendInputEvent) return result || { ok: false }
+        // 站点播放器可能忽略脚本合成的鼠标事件；Electron 输入事件可触发原生拖动条。
+        const { x, y } = result.point
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false }
+        for (const type of ['mouseMove', 'mouseDown', 'mouseUp']) {
+          view.webContents.sendInputEvent({ type, x, y, button: 'left', clickCount: 1 })
+        }
+        let state = await this.getPlaybackState()
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const target = Math.min(time, state.duration || time)
+          if (Math.abs(state.time - target) <= 1) return { ok: true, time: state.time }
+          await new Promise((resolve) => setTimeout(resolve, 250))
+          state = await this.getPlaybackState()
+        }
+        return { ok: false, time: state.time }
+      } catch {
+        return { ok: false }
       }
     },
     /** 播放/暂停切换 */
@@ -1206,6 +1273,7 @@ module.exports = {
   PLAY_SCRIPT,
   buildPlaySongScript,
   GET_PLAYBACK_STATE_SCRIPT,
+  buildSeekScript,
   FETCH_LIKED_SCRIPT,
   FETCH_PLAYLISTS_SCRIPT,
   FETCH_PLAYLIST_SONGS_SCRIPT,

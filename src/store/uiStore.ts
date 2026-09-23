@@ -5,6 +5,7 @@ export type ToolMode = 'select' | 'connect' | 'drag'
 /** 专用播放器页入口：画布音频/视频节点双击进入 */
 export type PlayerPageState =
   | { kind: 'audio'; assetId: string; flow: boolean; playlistId?: string }
+  | { kind: 'netease'; songId: string; nodeId?: string }
   | { kind: 'video'; assetId: string; name: string }
 
 export type ToastKind = 'info' | 'error' | 'success'

@@ -49,7 +49,7 @@ npm run desktop          # 构建并启动桌面应用
 npm run package:desktop  # 构建 Windows x64 安装程序 -> release/desktop/
 ```
 
-应用名称为「SuQCanvas 桌面版」，当前版本 1.4.4。安装程序为 `release/desktop/SuQCanvas-Desktop-1.4.4-Setup-x64.exe`，支持选择安装位置、桌面快捷方式和 `.sqcanvas` 文件关联。
+应用名称为「SuQCanvas 桌面版」，当前版本 1.4.5。安装程序为 `release/desktop/SuQCanvas-Desktop-1.4.5-Setup-x64.exe`，支持选择安装位置、桌面快捷方式和 `.sqcanvas` 文件关联。
 AI 生图任务保存在本机，可在工具栏「AI 任务」查看、恢复等待或下载结果。切换本地项目后，结果写回原项目；在线项目的结果先保存在本机，重新打开原项目时写入。ComfyUI 已记录任务编号的任务可恢复等待，其他中断请求需检查服务端结果后手动生成，应用不会自动重复提交。提示词草稿与原图信息分开保存，再次生成可选择沿用原图参数或使用当前设置。
 本地开发若安装环境跳过依赖的安装脚本，先运行 `node node_modules/electron/install.js` 下载 Electron 运行时。
 

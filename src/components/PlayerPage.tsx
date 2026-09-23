@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AudioPlayerView } from './AudioPlayer'
+import { NeteasePlayerView } from './NeteasePlayer'
 import { VideoPlayerView } from './VideoPlayer'
 import { db, type AssetRecord } from '../db/db'
 import { collectFiles } from '../media/managedFile'
@@ -14,7 +15,14 @@ import { useUiStore } from '../store/uiStore'
 export function PlayerPage() {
   const page = useUiStore((s) => s.playerPage)
   if (!page) return null
-  return page.kind === 'audio' ? <AudioPlayerPage /> : <VideoPlayerPage />
+  if (page.kind === 'audio') return <AudioPlayerPage />
+  if (page.kind === 'netease') return <NeteasePlayerPage songId={page.songId} nodeId={page.nodeId} />
+  return <VideoPlayerPage />
+}
+
+function NeteasePlayerPage({ songId, nodeId }: { songId: string; nodeId?: string }) {
+  const close = useUiStore((s) => s.closePlayerPage)
+  return <NeteasePlayerView songId={songId} nodeId={nodeId} onBack={close} onClose={close} />
 }
 
 function AudioPlayerPage() {

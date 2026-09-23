@@ -109,6 +109,11 @@ export function Toolbar() {
   const barVisible = usePlayerStore((s) => s.barVisible)
   const showCd = hasAudio && !barVisible
   const neteaseOpen = useNeteaseStore((s) => s.open)
+  const neteasePanelVisible = useNeteaseStore((s) => s.panelVisible)
+  const neteaseSongId = useNeteaseStore((s) => s.activeSongId)
+  const neteasePlaying = useNeteaseStore((s) => s.externalPlaying)
+  const neteaseFloatingVisible = useNeteaseStore((s) => s.floatingVisible)
+  const showNeteasePlayer = neteaseOpen && Boolean(neteaseSongId) && !neteaseFloatingVisible && !hasAudio
 
   useEffect(() => {
     if (!menuOpen) return
@@ -197,11 +202,12 @@ export function Toolbar() {
         className="flex shrink-0 items-center gap-1.5 rounded-md border border-edge2 px-2.5 py-1.5 text-xs text-soft hover:border-rose-500/50 hover:bg-hover hover:text-main"
         onClick={() => {
           const netease = useNeteaseStore.getState()
-          if (netease.open) netease.closePanel()
-          else void netease.openPanel(netease.target.type === 'home' ? null : netease.target)
+          if (netease.panelVisible) netease.closePanel()
+          else if (netease.open) netease.showPanel()
+          else void netease.openPanel()
         }}
       >
-        <NeteaseIcon className={neteaseOpen ? 'text-rose-500' : undefined} />
+        <NeteaseIcon className={neteasePanelVisible ? 'text-rose-500' : undefined} />
         网易云
       </button>
 
@@ -307,6 +313,17 @@ export function Toolbar() {
           onClick={() => usePlayerStore.getState().setBarVisible(true)}
         >
           <CdIcon className={`text-base ${audioPlaying ? 'sq-cd-spin text-sky-500' : 'sq-cd-paused text-faint'}`} />
+        </button>
+      )}
+
+      {showNeteasePlayer && (
+        <button
+          type="button"
+          title={neteasePlaying ? '网易云播放中，点击重新打开悬浮窗' : '网易云已暂停，点击重新打开悬浮窗'}
+          className="shrink-0 rounded-md p-1.5 text-rose-500 transition-colors hover:bg-hover"
+          onClick={() => useNeteaseStore.getState().setFloatingVisible(true)}
+        >
+          <NeteaseIcon className={neteasePlaying ? 'text-rose-500' : 'text-faint'} />
         </button>
       )}
 

@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('suqDesktop', {
   neteasePlaySong: (songId) => ipcRenderer.invoke('desktop:netease-play-song', songId),
   neteasePlaybackState: () => ipcRenderer.invoke('desktop:netease-playback-state'),
   neteaseToggle: () => ipcRenderer.invoke('desktop:netease-toggle'),
+  neteaseSeekTo: (time) => ipcRenderer.invoke('desktop:netease-seek-to', time),
   neteaseFetchLiked: () => ipcRenderer.invoke('desktop:netease-fetch-liked'),
   neteaseFetchPlaylists: () => ipcRenderer.invoke('desktop:netease-fetch-playlists'),
   neteaseFetchPlaylistSongs: (playlistId) => ipcRenderer.invoke('desktop:netease-fetch-playlist-songs', playlistId),

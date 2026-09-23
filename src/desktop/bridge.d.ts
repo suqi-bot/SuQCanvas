@@ -41,6 +41,7 @@ declare global {
       neteasePlaybackState?: () => Promise<{
         songId: string
         playing: boolean
+        ended: boolean
         time: number
         duration: number
         progress: number
@@ -48,6 +49,7 @@ declare global {
       }>
       /** 播放/暂停切换 */
       neteaseToggle?: () => Promise<{ ok: boolean; playing?: boolean; paused?: boolean; message?: string }>
+      neteaseSeekTo?: (time: number) => Promise<{ ok: boolean; time?: number }>
       /** 登录后拉取「我喜欢的音乐」 */
       neteaseFetchLiked?: () => Promise<
         | { ok: true; playlistId: string; playlistName: string; songs: NeteaseLikedSong[] }

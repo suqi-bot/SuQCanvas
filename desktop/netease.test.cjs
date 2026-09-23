@@ -13,6 +13,7 @@ const {
   mapPlaylistSummaries,
   buildPlaylistSongsScript,
   buildPlaySongScript,
+  buildSeekScript,
   GET_PLAYBACK_STATE_SCRIPT,
 } = require('./netease.cjs')
 
@@ -234,6 +235,84 @@ test('playback state script reads media progress fields', () => {
   assert.ok(GET_PLAYBACK_STATE_SCRIPT.includes('duration'))
   assert.ok(GET_PLAYBACK_STATE_SCRIPT.includes('playing'))
   assert.ok(GET_PLAYBACK_STATE_SCRIPT.includes('songId'))
+})
+
+test('seek uses the active media and clamps to its duration', async () => {
+  assert.equal(buildSeekScript(Infinity), null)
+  assert.equal(buildSeekScript(-1), null)
+  const oldMedia = { src: 'old.mp3', currentSrc: 'old.mp3', paused: true, readyState: 4, currentTime: 5, duration: 40 }
+  const activeMedia = { src: 'new.mp3', currentSrc: 'new.mp3', paused: false, readyState: 4, currentTime: 35, duration: 40 }
+  const document = {
+    querySelectorAll: (selector) => selector === 'audio,video' ? [oldMedia, activeMedia] : [],
+    querySelector: () => null,
+  }
+  const context = { document, setTimeout: (callback) => callback() }
+  assert.equal((await vm.runInNewContext(buildSeekScript(50), context)).ok, true)
+  assert.equal(activeMedia.currentTime, 40)
+  assert.equal(oldMedia.currentTime, 5)
+  assert.equal((await vm.runInNewContext(buildSeekScript(12), context)).time, 12)
+})
+
+test('playback state follows the playing audio instead of a stale audio element', () => {
+  const oldMedia = { src: 'old.mp3', paused: true, ended: false, currentTime: 90, duration: 180 }
+  const activeMedia = { src: 'new.mp3', paused: false, ended: false, currentTime: 12, duration: 120 }
+  const document = {
+    querySelectorAll: (selector) => selector === 'audio,video' ? [oldMedia, activeMedia] : [],
+    querySelector: () => null,
+  }
+  const state = vm.runInNewContext(GET_PLAYBACK_STATE_SCRIPT, {
+    document, location: { hash: '#/song?id=2', search: '' },
+  })
+  assert.equal(state.time, 12)
+  assert.equal(state.duration, 120)
+})
+
+test('seek falls back to the NetEase player bar when audio is not exposed', async () => {
+  let clock = '0:10 / 1:00'
+  const progress = {
+    getBoundingClientRect: () => ({ left: 100, top: 10, width: 200, height: 8 }),
+    dispatchEvent: (event) => { if (event.type === 'click') clock = '0:30 / 1:00' },
+  }
+  const bar = {
+    querySelector: (selector) => {
+      if (selector === '.m-pbar .barbg, .m-pbar') return progress
+      if (selector === '.m-pbar .time') return { get textContent() { return clock } }
+      return null
+    },
+  }
+  const document = {
+    querySelectorAll: () => [],
+    querySelector: (selector) => selector === '#g_player, .m-playbar' ? bar : null,
+  }
+  class MouseEvent { constructor(type, init) { this.type = type; Object.assign(this, init) } }
+  const result = await vm.runInNewContext(buildSeekScript(30), {
+    document, MouseEvent, setTimeout: (callback) => callback(),
+  })
+  assert.equal(result.ok, true)
+  assert.equal(result.time, 30)
+})
+
+test('seek exposes player bar coordinates when scripted clicks are ignored', async () => {
+  const progress = {
+    getBoundingClientRect: () => ({ left: 100, top: 10, width: 200, height: 8 }),
+    dispatchEvent: () => false,
+  }
+  const bar = { querySelector: (selector) => {
+    if (selector === '.m-pbar .barbg, .m-pbar') return progress
+    if (selector === '.m-pbar .time') return { textContent: '0:10 / 1:00' }
+    return null
+  } }
+  const document = {
+    querySelectorAll: () => [],
+    querySelector: (selector) => selector === '#g_player, .m-playbar' ? bar : null,
+  }
+  class MouseEvent { constructor(type, init) { this.type = type; Object.assign(this, init) } }
+  const result = await vm.runInNewContext(buildSeekScript(30), {
+    document, MouseEvent, setTimeout: (callback) => callback(),
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.point.x, 200)
+  assert.equal(result.point.y, 14)
 })
 
 test('playback state reads audio inside the song iframe', () => {

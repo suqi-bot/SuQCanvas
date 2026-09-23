@@ -35,7 +35,7 @@ interface PlayerState {
   /** 当前歌单队列（仅流式模式存在；null = 按全部歌曲/画布连线顺序） */
   queue: PlaylistQueue | null
   /** 播放指定歌曲；opts.autoplay 控制是否立即起播（默认 false 只载入） */
-  play: (t: { assetId: string; name?: string; nodeId?: string }, opts?: { autoplay?: boolean }) => void
+  play: (t: { assetId: string; name?: string; nodeId?: string }, opts?: { autoplay?: boolean; preserveFlowOrder?: boolean }) => void
   toggle: () => void
   seekTo: (time: number) => void
   seekBy: (delta: number) => void
@@ -54,6 +54,7 @@ let audioElement: HTMLAudioElement | null = null
 let orderProvider: (() => string[]) | null = null
 /** 异步 URL 解析的竞态令牌：快速连续 play() 时只应用最后一次 */
 let playSeq = 0
+let flowOriginNodeId: string | null = null
 /** 本地起播前暂停外部源（如网易云面板）的钩子，由 neteaseStore 注册，避免循环依赖 */
 let pauseExternalSource: (() => void) | null = null
 
@@ -117,6 +118,10 @@ function baseOrder(): string[] | null {
   if (s.mode !== 'flow' && orderProvider) {
     const list = orderProvider()
     if (list && list.length > 0) return list
+  }
+  if (flowOriginNodeId) {
+    const order = graphOrderFor(t.assetId, flowOriginNodeId)
+    if (order.includes(t.assetId)) return order
   }
   return graphOrderFor(t.assetId, t.nodeId)
 }
@@ -182,6 +187,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const seq = ++playSeq
     // 本地与外部源互斥出声
     pauseExternalSource?.()
+    if (!opts?.preserveFlowOrder || !flowOriginNodeId ||
+      !graphOrderFor(t.assetId, flowOriginNodeId).includes(t.assetId)) {
+      flowOriginNodeId = t.nodeId ?? findNodeIdFor(t.assetId) ?? null
+    }
     const current = get().track
     // 同一首歌：不重新加载，仅保持/恢复播放状态
     if (current && current.assetId === t.assetId) {
@@ -284,6 +293,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   stop: () => {
+    flowOriginNodeId = null
     const el = audioElement
     if (el) {
       el.pause()
@@ -301,5 +311,5 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 /** 切歌播放（供 next/prev 使用）：以画布节点作为来源，保证流式顺序可解析 */
 function playTrack(assetId: string, autoplay: boolean): void {
   const nodeId = findNodeIdFor(assetId)
-  usePlayerStore.getState().play({ assetId, nodeId }, { autoplay })
+  usePlayerStore.getState().play({ assetId, nodeId }, { autoplay, preserveFlowOrder: true })
 }

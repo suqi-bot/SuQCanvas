@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 're
 import { CloseIcon, PlayIcon, SearchIcon } from '../canvas/nodes/Icons'
 import { NETEASE_DRAG_MIME, type NeteaseDragPayload } from '../media/netease'
 import { registerNeteaseLoginHost, useNeteaseStore, type NeteaseLikedSong } from '../store/neteaseStore'
+import { useUiStore } from '../store/uiStore'
 import { IS_DESKTOP_BUILD } from '../buildMode'
 
 function toPayload(song: NeteaseLikedSong): NeteaseDragPayload {
@@ -59,7 +60,7 @@ function SongRow({
  * 「登录」时列表隐藏，登录页铺满标题栏以下区域并加宽面板。
  */
 export function NeteasePanel() {
-  const open = useNeteaseStore((s) => s.open)
+  const panelVisible = useNeteaseStore((s) => s.panelVisible)
   const closePanel = useNeteaseStore((s) => s.closePanel)
   const playlists = useNeteaseStore((s) => s.playlists)
   const playlistsLoading = useNeteaseStore((s) => s.playlistsLoading)
@@ -82,12 +83,13 @@ export function NeteasePanel() {
   const showLogin = useNeteaseStore((s) => s.showLogin)
   const hideLogin = useNeteaseStore((s) => s.hideLogin)
   const loggedIn = useNeteaseStore((s) => s.loggedIn)
+  const activeSongId = useNeteaseStore((s) => s.activeSongId)
   const loginHostRef = useRef<HTMLDivElement | null>(null)
   const [submitted, setSubmitted] = useState('')
 
   useLayoutEffect(() => {
-    registerNeteaseLoginHost(loginVisible ? loginHostRef.current : null)
-    if (!loginVisible) return
+    registerNeteaseLoginHost(loginVisible && panelVisible ? loginHostRef.current : null)
+    if (!loginVisible || !panelVisible) return
     const el = loginHostRef.current
     if (!el) return
     const push = () => {
@@ -113,17 +115,17 @@ export function NeteasePanel() {
       window.clearTimeout(t2)
       registerNeteaseLoginHost(null)
     }
-  }, [loginVisible])
+  }, [loginVisible, panelVisible])
 
   useEffect(() => {
-    if (!open || !IS_DESKTOP_BUILD) return
+    if (!panelVisible || !IS_DESKTOP_BUILD) return
     void useNeteaseStore.getState().checkLogin()
     if (!useNeteaseStore.getState().playlists.length && !useNeteaseStore.getState().playlistsLoading) {
       void useNeteaseStore.getState().refreshPlaylists()
     }
-  }, [open])
+  }, [panelVisible])
 
-  if (!open) return null
+  if (!panelVisible) return null
 
   const onSearchSubmit = (event: React.FormEvent) => {
     event.preventDefault()
@@ -147,6 +149,9 @@ export function NeteasePanel() {
           <span className={`text-[10px] ${loggedIn ? 'text-emerald-500' : 'text-dim'}`}>
             {loggedIn === true ? '已登录' : loggedIn === false ? '未登录' : ''}
           </span>
+        )}
+        {activeSongId && !loginVisible && (
+          <button type="button" onClick={() => { closePanel(); useUiStore.getState().openPlayerPage({ kind: 'netease', songId: activeSongId }) }} className="rounded border border-edge2 px-2 py-0.5 text-[11px] text-soft hover:border-rose-500/50 hover:text-main" title="在音乐播放器中查看当前歌曲">播放器</button>
         )}
         <button
           type="button"
@@ -216,7 +221,7 @@ export function NeteasePanel() {
               {searchResults && searchResults.length > 0 && (
                 <ul className="space-y-0.5">
                   {searchResults.map((song, i) => (
-                    <SongRow key={`s-${song.id}-${i}`} song={song} index={i} showIndex={false} onPlay={playLikedSong} />
+                    <SongRow key={`s-${song.id}-${i}`} song={song} index={i} showIndex={false} onPlay={(id) => playLikedSong(id, 'search')} />
                   ))}
                 </ul>
               )}
@@ -311,7 +316,7 @@ export function NeteasePanel() {
               {liked && liked.songs.length > 0 && (
                 <ul className="space-y-0.5">
                   {liked.songs.map((song, i) => (
-                    <SongRow key={`l-${song.id}-${i}`} song={song} index={i} onPlay={playLikedSong} />
+                    <SongRow key={`l-${song.id}-${i}`} song={song} index={i} onPlay={(id) => playLikedSong(id, 'playlist')} />
                   ))}
                 </ul>
               )}

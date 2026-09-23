@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { neteaseUrlFor, type NeteaseRef } from '../media/netease'
+import { linearizeNeteaseFrom } from '../media/neteaseFlow'
+import { useCanvasStore } from './canvasStore'
 import { setExternalSourcePauseHook, usePlayerStore } from './playerStore'
 import { toast } from './uiStore'
 
@@ -33,8 +35,12 @@ export interface NeteaseLikedList {
 }
 
 interface NeteaseState {
+  /** 网易云播放容器是否仍在运行 */
   open: boolean
   setOpen: (open: boolean) => void
+  /** 侧栏可见性，独立于播放容器 */
+  panelVisible: boolean
+  showPanel: () => void
   target: NeteaseRef
   setTarget: (ref: NeteaseRef) => void
   openPanel: (ref?: NeteaseRef | string | null, opts?: { keepLocal?: boolean }) => Promise<void>
@@ -54,11 +60,19 @@ interface NeteaseState {
   /** 兼容旧调用：刷新全部歌单 */
   refreshLiked: () => Promise<void>
   selectPlaylist: (playlistId: string) => Promise<void>
-  playLikedSong: (id: string) => void
+  playLikedSong: (id: string, source: 'playlist' | 'search') => Promise<void>
   /** 画布/列表点播指定歌曲（专用链路，避免误点第一首） */
-  playSong: (songId: string) => Promise<void>
+  playSong: (songId: string, name?: string, queue?: NeteaseLikedSong[], source?: 'list' | 'flow') => Promise<void>
   /** 网易云侧当前曲（画布节点用来显示进度/暂停） */
   activeSongId: string | null
+  activeSongName: string
+  playQueue: NeteaseLikedSong[]
+  queueSource: 'list' | 'flow'
+  previousSong: () => Promise<void>
+  nextSong: () => Promise<void>
+  useNodeFlow: (nodeId: string, songId: string) => void
+  floatingVisible: boolean
+  setFloatingVisible: (visible: boolean) => void
   externalPlaying: boolean
   externalTime: number
   externalDuration: number
@@ -66,7 +80,8 @@ interface NeteaseState {
   /** 读一次页内状态并写入 store；返回是否成功 */
   pollPlayback: () => Promise<boolean>
   /** 同一首：暂停/继续；否则当播放 */
-  toggleSong: (songId: string) => Promise<void>
+  toggleSong: (songId: string, name?: string, nodeId?: string) => Promise<void>
+  seekTo: (time: number) => Promise<void>
   searchQuery: string
   searchResults: NeteaseLikedSong[] | null
   searchLoading: boolean
@@ -98,6 +113,34 @@ function toRef(input?: NeteaseRef | string | null): NeteaseRef {
     return { type: 'home' }
   }
   return input
+}
+
+function songNameFor(id: string, state: NeteaseState): string {
+  return state.liked?.songs.find((song) => song.id === id)?.name
+    ?? state.searchResults?.find((song) => song.id === id)?.name
+    ?? `网易云歌曲 ${id}`
+}
+
+function queueForSong(id: string, state: NeteaseState): NeteaseLikedSong[] {
+  if (state.liked?.songs.some((song) => song.id === id)) return state.liked.songs
+  if (state.searchResults?.some((song) => song.id === id)) return state.searchResults
+  return [{ id, name: songNameFor(id, state) }]
+}
+
+function queueForNode(nodeId: string, songId: string): NeteaseLikedSong[] | null {
+  const { nodes, edges } = useCanvasStore.getState()
+  const tracks = linearizeNeteaseFrom(nodes, edges, nodeId)
+  if (tracks[0]?.id !== songId) return null
+  const byNodeId = new Map(nodes.map((node) => [node.id, node]))
+  return tracks.map(({ nodeId: trackNodeId, id, name }) => ({
+    id,
+    name,
+    coverUrl: byNodeId.get(trackNodeId)?.data.neteaseCoverUrl,
+  }))
+}
+
+function hasPlaybackBridge(): boolean {
+  return Boolean(window.suqDesktop?.neteasePlaySong || window.suqDesktop?.neteaseOpen)
 }
 
 async function bridgeOpenHidden(ref: NeteaseRef): Promise<boolean> {
@@ -137,6 +180,13 @@ function getOpen(): boolean {
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let pollBusy = false
+let playRequestSeq = 0
+let playInFlightId: string | null = null
+let expectedSongId: string | null = null
+let expectedSongUntil = 0
+let seekRequestSeq = 0
+let pendingSeek: { songId: string; time: number; until: number } | null = null
+let stoppedAtFlowEnd: string | null = null
 
 function stopPlaybackPoll(): void {
   if (pollTimer) {
@@ -161,6 +211,7 @@ function ensurePlaybackPoll(): void {
 
 export const useNeteaseStore = create<NeteaseState>((set, get) => ({
   open: false,
+  panelVisible: false,
   target: { type: 'home' },
   playlists: [],
   playlistsLoading: false,
@@ -176,34 +227,51 @@ export const useNeteaseStore = create<NeteaseState>((set, get) => ({
   loginVisible: false,
   loggedIn: null,
   activeSongId: null,
+  activeSongName: '',
+  playQueue: [],
+  queueSource: 'list',
+  floatingVisible: false,
   externalPlaying: false,
   externalTime: 0,
   externalDuration: 0,
   externalProgress: 0,
+  setFloatingVisible: (floatingVisible) => set({ floatingVisible }),
+  showPanel: () => set({ panelVisible: true }),
   setOpen: (open) => {
-    set({ open })
+    set({ open, ...(!open ? { panelVisible: false, loginVisible: false } : {}) })
     if (!open) {
+      playRequestSeq += 1
+      seekRequestSeq += 1
+      pendingSeek = null
+      stoppedAtFlowEnd = null
+      playInFlightId = null
+      expectedSongId = null
       void bridgeClose()
       stopPlaybackPoll()
-      set({ externalPlaying: false, externalTime: 0, externalDuration: 0, externalProgress: 0 })
+      set({ activeSongId: null, activeSongName: '', playQueue: [], queueSource: 'list', floatingVisible: false, externalPlaying: false, externalTime: 0, externalDuration: 0, externalProgress: 0 })
     }
   },
   setTarget: (target) => set({ target }),
   openPanel: async (ref, opts) => {
     const target = toRef(ref)
     if (target.type === 'song' && target.id) {
+      set({ panelVisible: true })
       await get().playSong(target.id)
+      return
+    }
+    if (get().open && target.type === 'home') {
+      set({ panelVisible: true })
       return
     }
     if (!opts?.keepLocal) {
       usePlayerStore.getState().stop()
     }
     const wasOpen = get().open
-    set({ open: true, target })
+    set({ open: true, panelVisible: true, target })
     try {
       const ok = await bridgeOpenHidden(target)
       if (!ok) {
-        set({ open: false })
+        set({ open: false, panelVisible: false })
         window.open(neteaseUrlFor(target), '_blank', 'noopener,noreferrer')
         toast('已在浏览器打开网易云', 'info')
         return
@@ -228,18 +296,18 @@ export const useNeteaseStore = create<NeteaseState>((set, get) => ({
         }
         return
       }
-      set({ open: false })
+      set({ open: false, panelVisible: false })
       toast(message || '打开网易云失败', 'error')
     }
   },
   closePanel: () => {
-    set({ open: false, loginVisible: false, externalPlaying: false, externalTime: 0, externalDuration: 0, externalProgress: 0 })
-    stopPlaybackPoll()
-    void bridgeClose()
+    set({ panelVisible: false, loginVisible: false })
+    void window.suqDesktop?.neteaseHideBrowser?.()
   },
   syncLayout: () => { /* 列表模式不依赖 webview 布局 */ },
   pauseExternal: () => {
     if (!get().open) return
+    set({ externalPlaying: false, floatingVisible: false })
     void bridgePause()
   },
   refreshPlaylists: async () => {
@@ -312,23 +380,36 @@ export const useNeteaseStore = create<NeteaseState>((set, get) => ({
       set({ likedLoading: false })
     }
   },
-  playLikedSong: (id) => {
+  playLikedSong: async (id, source) => {
     if (!id) return
-    void get().playSong(id)
+    const queue = source === 'search' ? get().searchResults : get().liked?.songs
+    await get().playSong(id, queue?.find((song) => song.id === id)?.name, queue ?? undefined)
   },
-  playSong: async (songId) => {
+  playSong: async (songId, name, queue, source = 'list') => {
     const id = String(songId || '').trim()
     if (!/^\d+$/.test(id)) {
       toast('无效的网易云歌曲 id', 'error')
       return
     }
     usePlayerStore.getState().stop()
+    const requestSeq = ++playRequestSeq
+    seekRequestSeq += 1
+    pendingSeek = null
+    stoppedAtFlowEnd = null
+    playInFlightId = id
+    expectedSongId = null
     const target: NeteaseRef = { type: 'song', id }
+    const playQueue = queue?.some((song) => song.id === id) ? queue : queueForSong(id, get())
     set({
       open: true,
+      panelVisible: get().open ? get().panelVisible : true,
       target,
       loginVisible: false,
       activeSongId: id,
+      activeSongName: name || playQueue.find((song) => song.id === id)?.name || songNameFor(id, get()),
+      playQueue,
+      queueSource: source,
+      floatingVisible: hasPlaybackBridge(),
       externalPlaying: false,
       externalTime: 0,
       externalDuration: 0,
@@ -350,12 +431,20 @@ export const useNeteaseStore = create<NeteaseState>((set, get) => ({
         return
       }
       const result = await play(id)
+      if (requestSeq !== playRequestSeq || !get().open) return
       await window.suqDesktop?.neteaseHideBrowser?.()
       // 即便 timeout 也把 activeSongId 钉在目标 id，进度条与暂停钮可用
       if (result?.actualId) {
-        set({ activeSongId: result.actualId })
+        set({
+          activeSongId: result.actualId,
+          ...(result.actualId !== id ? { activeSongName: songNameFor(result.actualId, get()) } : {}),
+        })
       } else {
         set({ activeSongId: id })
+      }
+      if (result?.actualId === id || (result?.ok && !result.actualId)) {
+        expectedSongId = id
+        expectedSongUntil = Date.now() + 3000
       }
       void get().pollPlayback()
       if (!result?.ok) {
@@ -367,6 +456,7 @@ export const useNeteaseStore = create<NeteaseState>((set, get) => ({
         }
       }
     } catch (error) {
+      if (requestSeq !== playRequestSeq || !get().open) return
       const message = error instanceof Error ? error.message : String(error)
       set({ activeSongId: id })
       ensurePlaybackPoll()
@@ -381,22 +471,75 @@ export const useNeteaseStore = create<NeteaseState>((set, get) => ({
         return
       }
       toast(message || '网易云起播失败', 'error')
+    } finally {
+      if (requestSeq === playRequestSeq) {
+        playInFlightId = null
+        void get().pollPlayback()
+      }
     }
   },
   pollPlayback: async () => {
     const bridge = window.suqDesktop
-    if (!bridge?.neteasePlaybackState) return false
+    if (!get().open || !bridge?.neteasePlaybackState) return false
     try {
       const s = await bridge.neteasePlaybackState()
-      if (!s) return false
+      if (!s || !get().open) return false
+      if (stoppedAtFlowEnd && get().queueSource === 'flow' && get().activeSongId === stoppedAtFlowEnd) {
+        // 网页播放器可能自行播放下一首；连线已到末尾后持续保持停止状态。
+        if (s.playing) await bridgePause()
+        const duration = get().externalDuration
+        set({ externalPlaying: false, externalTime: duration, externalProgress: duration > 0 ? 1 : 0 })
+        return true
+      }
+      if (playInFlightId && s.songId !== playInFlightId) return false
+      if (expectedSongId) {
+        const atFlowEnd = get().queueSource === 'flow' && get().externalDuration > 0 &&
+          get().externalTime >= get().externalDuration - 1.5
+        if (s.songId === expectedSongId || Date.now() >= expectedSongUntil || atFlowEnd) expectedSongId = null
+        else return false
+      }
+      const previous = get()
+      const seeking = pendingSeek?.songId === previous.activeSongId && Date.now() < pendingSeek.until
+      const siteAdvanced = Boolean(s.songId) && s.songId !== previous.activeSongId
+      const reachedFlowEnd = previous.queueSource === 'flow' && previous.externalPlaying && previous.activeSongId && (
+        (!seeking && (!s.songId || s.songId === previous.activeSongId) && Boolean(s.ended)) ||
+        siteAdvanced
+      )
+      if (reachedFlowEnd) {
+        const index = previous.playQueue.findIndex((song) => song.id === previous.activeSongId)
+        const next = index >= 0 ? previous.playQueue[index + 1] : undefined
+        if (next) {
+          if (siteAdvanced && s.songId === next.id && s.playing) {
+            pendingSeek = null
+            const duration = Number(s.duration) || 0
+            const time = Number(s.time) || 0
+            set({ activeSongId: next.id, activeSongName: next.name, externalPlaying: true, externalTime: time, externalDuration: duration, externalProgress: duration > 0 ? Math.min(1, time / duration) : 0 })
+            return true
+          }
+          await get().playSong(next.id, next.name, previous.playQueue, 'flow')
+          return true
+        }
+        stoppedAtFlowEnd = previous.activeSongId
+        await bridgePause()
+        if (get().activeSongId !== previous.activeSongId || get().queueSource !== 'flow') return true
+        const duration = previous.externalDuration || Number(s.duration) || 0
+        set({ externalPlaying: false, externalTime: duration, externalDuration: duration, externalProgress: duration > 0 ? 1 : 0 })
+        return true
+      }
       // 页内已切到其它 song 时跟随页内 id（避免进度画错节点）
       const active = s.songId || get().activeSongId
+      if (pendingSeek && (pendingSeek.songId !== active || Date.now() >= pendingSeek.until || Math.abs((Number(s.time) || 0) - pendingSeek.time) <= 1)) {
+        pendingSeek = null
+      }
+      const displayedTime = pendingSeek?.songId === active ? pendingSeek.time : (Number(s.time) || 0)
+      const displayedDuration = Number(s.duration) || previous.externalDuration
       set({
         activeSongId: active || null,
+        ...(active && active !== get().activeSongId ? { activeSongName: songNameFor(active, get()) } : {}),
         externalPlaying: Boolean(s.playing),
-        externalTime: Number(s.time) || 0,
-        externalDuration: Number(s.duration) || 0,
-        externalProgress: Number(s.progress) || 0,
+        externalTime: displayedTime,
+        externalDuration: displayedDuration,
+        externalProgress: displayedDuration > 0 ? Math.min(1, displayedTime / displayedDuration) : (Number(s.progress) || 0),
       })
       if (s.playing) ensurePlaybackPoll()
       return true
@@ -404,12 +547,23 @@ export const useNeteaseStore = create<NeteaseState>((set, get) => ({
       return false
     }
   },
-  toggleSong: async (songId) => {
+  toggleSong: async (songId, name, nodeId) => {
     const id = String(songId || '').trim()
     if (!/^\d+$/.test(id)) return
     const state = get()
     const isCurrent = state.activeSongId === id
+    const flowQueue = nodeId ? queueForNode(nodeId, id) : null
     if (isCurrent) {
+      if (stoppedAtFlowEnd === id) {
+        stoppedAtFlowEnd = null
+        await get().playSong(id, name || state.activeSongName, state.playQueue, state.queueSource)
+        return
+      }
+      set({
+        floatingVisible: hasPlaybackBridge(),
+        ...(name ? { activeSongName: name } : {}),
+        ...(flowQueue ? { playQueue: flowQueue, queueSource: 'flow' as const } : {}),
+      })
       const bridge = window.suqDesktop
       if (bridge?.neteaseToggle) {
         const r = await bridge.neteaseToggle()
@@ -427,7 +581,51 @@ export const useNeteaseStore = create<NeteaseState>((set, get) => ({
       void get().pollPlayback()
       return
     }
-    await get().playSong(id)
+    await get().playSong(id, name, flowQueue ?? undefined, flowQueue ? 'flow' : 'list')
+  },
+  previousSong: async () => {
+    const { activeSongId, playQueue, queueSource } = get()
+    const index = playQueue.findIndex((song) => song.id === activeSongId)
+    if (playQueue.length < 2 || index < 0) return
+    if (queueSource === 'flow' && index === 0) return
+    const song = playQueue[(index - 1 + playQueue.length) % playQueue.length]
+    await get().playSong(song.id, song.name, playQueue, queueSource)
+  },
+  nextSong: async () => {
+    const { activeSongId, playQueue, queueSource } = get()
+    const index = playQueue.findIndex((song) => song.id === activeSongId)
+    if (playQueue.length < 2 || index < 0) return
+    if (queueSource === 'flow' && index === playQueue.length - 1) return
+    const song = playQueue[(index + 1) % playQueue.length]
+    await get().playSong(song.id, song.name, playQueue, queueSource)
+  },
+  useNodeFlow: (nodeId, songId) => {
+    if (get().activeSongId !== songId) return
+    const queue = queueForNode(nodeId, songId)
+    if (queue) set({ playQueue: queue, queueSource: 'flow' })
+  },
+  seekTo: async (time) => {
+    const { activeSongId, externalDuration } = get()
+    const seek = window.suqDesktop?.neteaseSeekTo
+    if (!get().open || !activeSongId || !seek || externalDuration <= 0 || !Number.isFinite(time)) return
+    const next = Math.max(0, Math.min(time, externalDuration))
+    const requestSeq = ++seekRequestSeq
+    pendingSeek = { songId: activeSongId, time: next, until: Date.now() + 3000 }
+    set({ externalTime: next, externalProgress: next / externalDuration })
+    try {
+      const result = await seek(next)
+      if (requestSeq !== seekRequestSeq || get().activeSongId !== activeSongId) return
+      if (!result?.ok) {
+        pendingSeek = null
+        toast('网易云未能调整播放进度，请重试', 'error')
+      }
+    } catch {
+      if (requestSeq !== seekRequestSeq || get().activeSongId !== activeSongId) return
+      pendingSeek = null
+      toast('网易云未能调整播放进度，请重试', 'error')
+    } finally {
+      if (requestSeq === seekRequestSeq && get().activeSongId === activeSongId) void get().pollPlayback()
+    }
   },
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   clearSearch: () => set({ searchQuery: '', searchResults: null, searchError: null }),

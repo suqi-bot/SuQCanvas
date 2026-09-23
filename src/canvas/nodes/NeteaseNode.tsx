@@ -4,7 +4,7 @@ import type { SuqNode } from '../../types'
 import { neteaseUrlFor, parseNeteaseTarget } from '../../media/netease'
 import { useCanvasStore } from '../../store/canvasStore'
 import { useNeteaseStore } from '../../store/neteaseStore'
-import { toast } from '../../store/uiStore'
+import { toast, useUiStore } from '../../store/uiStore'
 import { MediaNodeShell } from './MediaNodeShell'
 import { AudioIcon, OpenIcon, PauseIcon, PlayIcon } from './Icons'
 
@@ -19,7 +19,7 @@ function fmtTime(seconds: number): string {
 export const NeteaseNode = memo(function NeteaseNode(props: NodeProps<SuqNode>) {
   const songId = typeof props.data.neteaseId === 'string' ? props.data.neteaseId : ''
   const cover = typeof props.data.neteaseCoverUrl === 'string' ? props.data.neteaseCoverUrl : ''
-  const open = useNeteaseStore((s) => s.open)
+  const open = useNeteaseStore((s) => s.panelVisible)
   const activeSongId = useNeteaseStore((s) => s.activeSongId)
   const externalPlaying = useNeteaseStore((s) => s.externalPlaying)
   const externalTime = useNeteaseStore((s) => s.externalTime)
@@ -43,11 +43,17 @@ export const NeteaseNode = memo(function NeteaseNode(props: NodeProps<SuqNode>) 
       toast('请先填写网易云歌曲 ID 或链接', 'error')
       return
     }
-    void useNeteaseStore.getState().toggleSong(numericId)
+    void useNeteaseStore.getState().toggleSong(numericId, props.data.label, props.id)
   }
 
   const openHome = () => {
     void useNeteaseStore.getState().openPanel({ type: 'home' })
+  }
+
+  const openPlayerPage = () => {
+    if (!numericId) return
+    useNeteaseStore.getState().closePanel()
+    useUiStore.getState().openPlayerPage({ kind: 'netease', songId: numericId, nodeId: props.id })
   }
 
   const commitLink = () => {
@@ -73,7 +79,7 @@ export const NeteaseNode = memo(function NeteaseNode(props: NodeProps<SuqNode>) 
 
   return (
     <MediaNodeShell node={props} alwaysShowBar alwaysShowCreator progress={progress}>
-      <div className="relative flex h-full w-full flex-col overflow-hidden">
+      <div className="relative flex h-full w-full flex-col overflow-hidden" onDoubleClick={(event) => { event.stopPropagation(); openPlayerPage() }}>
         {cover ? (
           <img
             src={cover}
